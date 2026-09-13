@@ -1,6 +1,6 @@
 <div align="center">
 
-[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.07-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
+[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.08-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
 
 # sonderr-memory
 
@@ -41,6 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/DXN1-termux/sonderr-memory/main/ins
 
 This installs the binary to `~/.local/bin/sonderr-memory` and adds it to your PATH if needed.
 
+> **Note:** The binary supports CLI and MCP commands. For TUI mode, clone the repo and run with `bun run src/main.ts`.
+
 ### Option 2: build from source
 
 ```bash
@@ -53,9 +55,12 @@ bun run build
 ## Usage
 
 ```bash
-sonderr-memory            # launch TUI
+sonderr-memory            # launch TUI (requires Bun source mode)
 sonderr-memory --help     # help
+sonderr-memory mcp        # start MCP server
 ```
+
+> **Note:** The compiled binary supports all non-TUI commands. For TUI mode, run from source with `bun run src/main.ts` or `bun run dev`.
 
 ### TUI hotkeys
 
