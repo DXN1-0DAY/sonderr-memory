@@ -1,6 +1,6 @@
 import blessed from "blessed";
 import { MemoryEntry } from "../memory/types";
-import { saveEntry, updateEntry } from "../memory/store";
+import { saveEntry, updateEntry, suggestTags } from "../memory/store";
 import { withErrorHandling } from "../errors/tui-errors";
 import { Theme, createTheme } from "./theme";
 
@@ -44,6 +44,7 @@ export type CreateMemoryOptions = {
   theme?: Theme;
   notify?: (message: string, duration?: number) => void;
   onFormClose?: () => void;
+  contextEntry?: MemoryEntry;
 };
 
 export function showCreateMemoryForm(opts: CreateMemoryOptions) {
@@ -162,6 +163,43 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
     style: { fg: theme.fg, bg: theme.bgPanel },
     content: " Tab: next | Ctrl+S: save | Esc: cancel ",
   });
+
+  const recommendationBox = blessed.box({
+    parent: form,
+    top: "84%",
+    left: 1,
+    width: "100%-2",
+    height: 1,
+    style: { fg: theme.fg, bg: theme.bgPanel },
+    content: "",
+  });
+
+  if (opts.contextEntry) {
+    const entry = opts.contextEntry;
+    if (entry.project) {
+      (projectInput as any).value = entry.project;
+    }
+    if (entry.topics.length > 0) {
+      (topicsInput as any).value = entry.topics.join(", ");
+    }
+
+    const nextSource =
+      entry.source === "inbox"
+        ? "project"
+        : entry.source === "project"
+          ? "lesson"
+          : entry.source === "topic"
+            ? "reference"
+            : "lesson";
+
+    const tips: string[] = [];
+    if (entry.project) tips.push(`project: ${entry.project}`);
+    if (entry.topics.length) tips.push(`topics: ${entry.topics.join(", ")}`);
+    tips.push(`suggested: ${nextSource}`);
+
+    (recommendationBox as any).setContent(`Tip: ${tips.join(" | ")}`);
+    (_hintBox as any).setContent(" Tab: next | Ctrl+S: save | Esc: cancel | see suggestions above ");
+  }
 
   const fields = [category, projectInput, topicsInput, nameInput, contentInput, saveBtn, cancelBtn] as any[];
 
@@ -323,6 +361,17 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     height: 1,
     style: { fg: "#e6e6e6", bg: "#1a1a1a" },
     content: " Tab: next | Ctrl+S: save | Esc: cancel ",
+  });
+
+  const recommended = suggestTags(opts.store, opts.entry, 5);
+  const _recommendationBox = blessed.box({
+    parent: form,
+    top: "80%",
+    left: 1,
+    width: "100%-2",
+    height: 1,
+    style: { fg: "#e6e6e6", bg: "#1a1a1a" },
+    content: recommended.length > 0 ? `Suggested: ${recommended.join(", ")}` : "",
   });
 
   const fields = [projectInput, topicsInput, tagsInput, saveBtn, cancelBtn] as any[];

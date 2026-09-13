@@ -1,11 +1,12 @@
 import { MemoryEntry, MemoryStore } from "../memory/types";
-import { createStore, loadEntries, searchEntries, getTimeline, getRelated, exportForContext, saveEntry, getMeta, saveSessionState, loadSessionState } from "../memory/store";
+import { createStore, loadEntries, searchEntries, getTimeline, getRelated, exportForContext, saveEntry, getMeta, saveSessionState, loadSessionState, linkEntries } from "../memory/store";
 import { withErrorHandling } from "../errors/tui-errors";
 import { getAllTutorials, getTutorial } from "../tutorial";
 import { loadConfig, saveConfig, getConfigPath } from "../config";
 import { checkForUpdate } from "../update";
 import { logger } from "../logger";
 import { createTheme } from "./theme";
+import { tag } from "./format";
 import { showCreateMemoryForm } from "./forms";
 import { createSidebar, renderSidebarItems, type SidebarOptions } from "./panels/sidebar";
 import { createEditor, type EditorOptions } from "./panels/editor";
@@ -70,9 +71,10 @@ export function launchApp(opts: AppOptions = {}) {
       top: 0,
       left: 0,
       width: "100%",
-      height: "100%-2",
+      height: "100%-4",
       border: BORDER,
       padding: { top: 0, bottom: 0, left: 0, right: 0 },
+      tags: true,
       style: {
         fg: FG,
         bg: BG,
@@ -89,7 +91,7 @@ export function launchApp(opts: AppOptions = {}) {
     return require("blessed").textbox({
       parent: screen,
       label: " command ",
-      top: "100%-2",
+      top: "100%-4",
       left: 0,
       width: "100%",
       height: 2,
@@ -97,6 +99,18 @@ export function launchApp(opts: AppOptions = {}) {
       style: { fg: FG, bg: BG_PANEL, focus: { border: FOCUS_BORDER } },
       keys: true,
       mouse: true,
+    });
+  }, () => null) as any;
+
+  const helpFooter = withErrorHandling(() => {
+    return require("blessed").box({
+      parent: screen,
+      top: "100%-2",
+      left: 0,
+      width: "100%",
+      height: 1,
+      style: { fg: FG, bg: BG_PANEL },
+      content: " ? help | / commands | Ctrl+N new | Ctrl+S search | Tab: focus ",
     });
   }, () => null) as any;
 
@@ -126,6 +140,38 @@ export function launchApp(opts: AppOptions = {}) {
   let statusBarFlashTimer: NodeJS.Timeout | null = null;
   let mainTransitionTimer: NodeJS.Timeout | null = null;
   let paletteOpen = false;
+  let recentCommands: string[] = [];
+  let activeContext: "idle" | "sidebar" | "editor" | "timeline" | "metadata" | "input" | "modal" | "palette" = "idle";
+
+  function getContextHint(): string {
+    switch (activeContext) {
+      case "sidebar":
+        return " ? help | / commands | ↑↓ browse | Enter: select ";
+      case "editor":
+        return " ? help | / search | ↑↓ scroll | / context ";
+      case "timeline":
+        return " ? help | / commands | ↑↓ browse ";
+      case "metadata":
+        return " ? help | / commands | ↑↓ scroll ";
+      case "input":
+        return " Esc: cancel | Enter: submit | Tab: autocomplete ";
+      case "modal":
+        return " Tab: next | Shift+Tab: prev | Esc: cancel ";
+      case "palette":
+        return " ↑↓ select | Enter: run | Esc: close ";
+      default:
+        return " ? help | / commands | Ctrl+N new | Ctrl+S search | Tab: focus ";
+    }
+  }
+
+  function updateContextHint(context: typeof activeContext) {
+    activeContext = context;
+    const hint = getContextHint();
+    if (helpFooter) {
+      (helpFooter as any).setContent(hint);
+    }
+    screen.render();
+  }
 
   function isWide() {
     return screen.width >= NARROW_THRESHOLD;
@@ -163,6 +209,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
+      sidebar.on("focus", () => updateContextHint("sidebar"));
+      sidebar.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
+      });
+
       editor = createEditor({
         parent: main,
         top: 0,
@@ -171,6 +224,13 @@ export function launchApp(opts: AppOptions = {}) {
         height: "100%",
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
+      });
+
+      editor.box.on("focus", () => updateContextHint("editor"));
+      editor.box.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
       });
 
       metadataPanel = createMetadataPanel({
@@ -183,6 +243,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
+      metadataPanel.box.on("focus", () => updateContextHint("metadata"));
+      metadataPanel.box.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
+      });
+
       timelineList = createTimeline({
         parent: main,
         top: `${editorH + 1}`,
@@ -191,6 +258,13 @@ export function launchApp(opts: AppOptions = {}) {
         height: `${timelineH}`,
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
+      });
+
+      timelineList.on("focus", () => updateContextHint("timeline"));
+      timelineList.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
       });
     } else {
       const editorH = Math.max(1, mainHeight - Math.floor(mainHeight * 0.35) - 1);
@@ -206,6 +280,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
+      editor.box.on("focus", () => updateContextHint("editor"));
+      editor.box.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
+      });
+
       metadataPanel = createMetadataPanel({
         parent: main,
         top: 0,
@@ -216,6 +297,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
+      metadataPanel.box.on("focus", () => updateContextHint("metadata"));
+      metadataPanel.box.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
+      });
+
       timelineList = createTimeline({
         parent: main,
         top: `${editorH + 1}`,
@@ -224,6 +312,13 @@ export function launchApp(opts: AppOptions = {}) {
         height: `${timelineH}`,
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
+      });
+
+      timelineList.on("focus", () => updateContextHint("timeline"));
+      timelineList.on("blur", () => {
+        if (activeContext !== "modal" && activeContext !== "palette") {
+          updateContextHint("idle");
+        }
       });
     }
 
@@ -290,7 +385,8 @@ export function launchApp(opts: AppOptions = {}) {
     flashStatusBar();
     statusTimer = setTimeout(() => {
       statusTimer = null;
-      statusBar.setContent(" ready ");
+      const contextLabel = activeContext === "idle" ? "ready" : activeContext;
+      statusBar.setContent(` ${contextLabel} `);
       screen.render();
     }, duration);
   }
@@ -339,12 +435,17 @@ export function launchApp(opts: AppOptions = {}) {
 
   function renderWelcome() {
     withErrorHandling(() => {
+      const t = tag(theme);
       transitionMain([
         "",
-        "  context engine for AI coding agents",
+        t.heading("  sonderr-memory "),
+        t.muted("  context engine for AI coding agents"),
         "",
         "  Type / for commands",
         "",
+        t.divider(),
+        "",
+        "  Commands:",
         "    /tutorial      list tutorials",
         "    /mcp           start MCP server",
         "    /stats         show statistics",
@@ -364,6 +465,7 @@ export function launchApp(opts: AppOptions = {}) {
   }
 
   function showTelemetryPrompt() {
+    updateContextHint("modal");
     const prompt = withErrorHandling(() => {
       return require("blessed").form({
         parent: screen,
@@ -456,6 +558,7 @@ export function launchApp(opts: AppOptions = {}) {
       config.usageStats = { sessionCount: 1, lastUsedAt: new Date().toISOString(), commandCounts: {} };
       saveConfig(config);
       prompt.destroy();
+      updateContextHint("idle");
       screen.render();
       notify("usage stats enabled — local only", 3000);
     });
@@ -464,6 +567,7 @@ export function launchApp(opts: AppOptions = {}) {
       config.enableUsageStats = false;
       saveConfig(config);
       prompt.destroy();
+      updateContextHint("idle");
       screen.render();
       notify("usage stats disabled", 3000);
     });
@@ -502,9 +606,14 @@ export function launchApp(opts: AppOptions = {}) {
 
   function renderResultsList(results: MemoryEntry[], query: string) {
     withErrorHandling(() => {
-      const lines = results.map((r, i) =>
-        `${i + 1}. ${r.createdAt.slice(0, 10)} | ${r.source} | ${r.project || "(none)"} | ${r.content.split("\n")[0].slice(0, 50)}`
-      );
+      const t = tag(theme);
+      const lines = [
+        t.heading(`RESULTS: "${query}"`),
+        "",
+        ...results.map((r, i) =>
+          `${i + 1}. ${r.createdAt.slice(0, 10)} | {fg-${theme.accent}}${r.source}{/fg-${theme.accent}} | ${r.project || "(none)"} | ${r.content.split("\n")[0].slice(0, 50)}`
+        ),
+      ];
       transitionMain(lines.join("\n"));
       const filterStr = Object.keys(currentFilter).length > 0
         ? ` | filter: ${Object.entries(currentFilter).map(([k, v]) => `${k}=${v}`).join(", ")}`
@@ -541,6 +650,7 @@ export function launchApp(opts: AppOptions = {}) {
       }
 
       const lines: string[] = [];
+      const t = tag(theme);
       for (const e of recent) {
         const title = e.content.split("\n")[0].slice(0, 80);
         const date = new Date(e.createdAt).toLocaleDateString();
@@ -554,7 +664,7 @@ export function launchApp(opts: AppOptions = {}) {
         }
       }
 
-      transitionMain(lines.join("\n"));
+      transitionMain([t.heading("RECENT MEMORIES"), "", ...lines].join("\n"));
       statusBar.setContent(`${recent.length} memories`);
       flashStatusBar();
     }, () => {
@@ -564,6 +674,7 @@ export function launchApp(opts: AppOptions = {}) {
 
   function handleNewMemory() {
     formOpen = true;
+    updateContextHint("modal");
     showCreateMemoryForm({
       screen,
       store,
@@ -572,12 +683,15 @@ export function launchApp(opts: AppOptions = {}) {
       notify,
       onFormClose: () => {
         formOpen = false;
+        updateContextHint("idle");
       },
+      contextEntry: selectedEntry ?? undefined,
     });
   }
 
   function handleSearch() {
     if (formOpen) return;
+    updateContextHint("modal");
     const prompt = withErrorHandling(() => {
       return require("blessed").prompt({
         parent: screen,
@@ -599,6 +713,7 @@ export function launchApp(opts: AppOptions = {}) {
     (prompt as any).input("query", (err: Error | null, value: string) => {
       withErrorHandling(() => {
         prompt.destroy();
+        updateContextHint("idle");
         if (value) {
           saveSessionState(store, { lastQuery: value });
           const results = searchEntries(store, value);
@@ -612,6 +727,7 @@ export function launchApp(opts: AppOptions = {}) {
         }
       }, () => {
         prompt.destroy();
+        updateContextHint("idle");
         screen.render();
       });
     });
@@ -637,6 +753,94 @@ export function launchApp(opts: AppOptions = {}) {
     return qi === q.length ? score : -1;
   }
 
+  function getRecommendedCommands(): Array<{ cmd: string; desc: string }> {
+    const scored = new Map<string, { cmd: string; desc: string; score: number }>();
+    const commandCounts = config.usageStats?.commandCounts || {};
+
+    const add = (cmd: string, desc: string, score: number) => {
+      const existing = scored.get(cmd);
+      if (existing) {
+        existing.score = Math.max(existing.score, score);
+      } else {
+        scored.set(cmd, { cmd, desc, score });
+      }
+    };
+
+    for (const item of [
+      { cmd: "/tutorial", desc: "list tutorials" },
+      { cmd: "/tutorial <id>", desc: "run tutorial" },
+      { cmd: "/help", desc: "show help" },
+      { cmd: "/mcp", desc: "start MCP server" },
+      { cmd: "/stats", desc: "show statistics" },
+      { cmd: "/timeline", desc: "show recent memories" },
+      { cmd: "/view", desc: "toggle view mode" },
+      { cmd: "/view compact", desc: "compact list view" },
+      { cmd: "/view expanded", desc: "expanded list view" },
+      { cmd: "/context <query>", desc: "preview context for query" },
+      { cmd: "/clear", desc: "clear screen" },
+      { cmd: "/search <query>", desc: "search memories" },
+      { cmd: "/new", desc: "create new memory" },
+      { cmd: "/recover", desc: "restore unsaved draft" },
+      { cmd: "/quit", desc: "quit" },
+    ]) {
+      const baseCmd = item.cmd.split(" ")[0];
+      add(item.cmd, item.desc, (commandCounts[baseCmd] || 0) * 2);
+    }
+
+    for (let i = recentCommands.length - 1; i >= 0; i--) {
+      const cmd = recentCommands[i];
+      const existing = scored.get(cmd);
+      if (existing) {
+        existing.score += (5 - i) * 1.5;
+      }
+    }
+
+    if (selectedEntry) {
+      const entry = selectedEntry;
+      if (entry.project) {
+        add(`/filter project:${entry.project}`, `filter by project: ${entry.project}`, 18);
+        add(`/search ${entry.project}`, `search project: ${entry.project}`, 15);
+      }
+      for (const topic of entry.topics) {
+        add(`/filter topic:${topic}`, `filter by topic: ${topic}`, 17);
+        add(`/search ${topic}`, `search topic: ${topic}`, 14);
+      }
+      const contextQuery = entry.project || entry.topics[0] || entry.content.split("\n")[0].slice(0, 30);
+      add(`/context ${contextQuery}`, `preview context for current entry`, 20);
+
+      const nextSource =
+        entry.source === "inbox"
+          ? "project"
+          : entry.source === "project"
+            ? "lesson"
+            : entry.source === "topic"
+              ? "reference"
+              : "lesson";
+      add(`/new ${nextSource}`, `create ${nextSource} from ${entry.source}`, 12);
+
+      if (entry.source === "inbox") {
+        add("/new topic", "create topic from inbox", 11);
+      } else if (entry.source === "project") {
+        add("/new topic", "create topic from project", 11);
+      } else if (entry.source === "topic") {
+        add("/new project", "create project from topic", 11);
+      }
+    } else {
+      add("/timeline", "show recent memories", 10);
+      add("/stats", "show statistics", 8);
+      add("/new", "create new memory", 9);
+    }
+
+    if (Object.keys(currentFilter).length > 0) {
+      add("/clearfilters", "clear active filters", 19);
+    }
+
+    return Array.from(scored.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15)
+      .map((s) => ({ cmd: s.cmd, desc: s.desc }));
+  }
+
   function showCommandPalette() {
     const commandList = [
       { cmd: "/tutorial", desc: "list tutorials" },
@@ -651,6 +855,9 @@ export function launchApp(opts: AppOptions = {}) {
       { cmd: "/context <query>", desc: "preview context for query" },
       { cmd: "/clear", desc: "clear screen" },
       { cmd: "/search <query>", desc: "search memories" },
+      { cmd: "/link <id>", desc: "link selected entry to another" },
+      { cmd: "/related", desc: "show related entries" },
+      { cmd: "/graph", desc: "show relationship graph" },
       { cmd: "/new", desc: "create new memory" },
       { cmd: "/recover", desc: "restore unsaved draft" },
       { cmd: "/quit", desc: "quit" },
@@ -719,7 +926,7 @@ export function launchApp(opts: AppOptions = {}) {
     if (!input || !list) return;
 
     paletteOpen = true;
-    let currentItems = allItems;
+    let currentItems = getRecommendedCommands();
 
     function updateSuggestions(query: string) {
       const q = query.trim();
@@ -734,7 +941,7 @@ export function launchApp(opts: AppOptions = {}) {
           .sort((a, b) => b.score - a.score);
         currentItems = scored.map((s) => s.item);
       } else {
-        currentItems = allItems;
+        currentItems = getRecommendedCommands();
       }
       (list as any).setItems(currentItems.map((i) => `${i.cmd.padEnd(24)} ${i.desc}`));
       (list as any).select(0);
@@ -746,6 +953,7 @@ export function launchApp(opts: AppOptions = {}) {
         paletteOpen = false;
         input.destroy();
         palette.destroy();
+        updateContextHint("idle");
         statusBar.setContent(" ready ");
         screen.render();
       } else if (key.name === "up") {
@@ -765,6 +973,7 @@ export function launchApp(opts: AppOptions = {}) {
       paletteOpen = false;
       input.destroy();
       palette.destroy();
+      updateContextHint("idle");
       const selectedIdx = (list as any).selected || 0;
       const selected = currentItems[selectedIdx];
       if (selected) {
@@ -821,13 +1030,30 @@ export function launchApp(opts: AppOptions = {}) {
         stats.sources[e.source] = (stats.sources[e.source] || 0) + 1;
         if (e.project) stats.projects[e.project] = (stats.projects[e.project] || 0) + 1;
       }
-      transitionMain(JSON.stringify(stats, null, 2));
+      const t = tag(theme);
+      const lines = [
+        t.heading("STATISTICS"),
+        "",
+        `${t.label("total:")}    ${stats.total}`,
+        "",
+        t.heading("SOURCES"),
+        ...Object.entries(stats.sources).map(([k, v]) => `${t.label(`${k}:`)} ${v}`),
+        "",
+        t.heading("PROJECTS"),
+        ...Object.entries(stats.projects).map(([k, v]) => `${t.label(`${k}:`)} ${v}`),
+      ];
+      transitionMain(lines.join("\n"));
       statusBar.setContent("stats");
       flashStatusBar();
       screen.render();
     } else if (trimmed === "/timeline" || trimmed === "timeline") {
       const recent = getTimeline(store, 20);
-      const lines = recent.map((r) => `${r.createdAt} | ${r.source} | ${r.content.split("\n")[0].slice(0, 60)}`);
+      const t = tag(theme);
+      const lines = [
+        t.heading("TIMELINE"),
+        "",
+        ...recent.map((r) => `${r.createdAt} | ${r.source} | ${r.content.split("\n")[0].slice(0, 60)}`),
+      ];
       transitionMain(lines.join("\n") || "(empty)");
       statusBar.setContent("timeline");
       flashStatusBar();
@@ -909,8 +1135,9 @@ export function launchApp(opts: AppOptions = {}) {
 
   function showTutorialList() {
     const tutorials = getAllTutorials();
-    const items = tutorials.map((t) => `${t.id}: ${t.name}\n    ${t.description}`);
-    main.setContent(["Available tutorials:", "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
+    const t = tag(theme);
+    const items = tutorials.map((tut) => `${tut.id}: ${tut.name}\n    ${tut.description}`);
+    main.setContent([t.heading("Available tutorials:"), "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
     statusBar.setContent("tutorials");
     screen.render();
   }
@@ -921,8 +1148,9 @@ export function launchApp(opts: AppOptions = {}) {
       const q = filterQuery.toLowerCase();
       return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
     });
+    const t = tag(theme);
     const lines = [
-      "PLUGINS",
+      t.heading("PLUGINS"),
       "",
       ...plugins.map((p) => {
         const status = p.enabled ? "[ON ]" : "[OFF]";
@@ -954,14 +1182,15 @@ export function launchApp(opts: AppOptions = {}) {
       screen.render();
       return;
     }
+    const t = tag(theme);
     const lines: string[] = [
-      `=== ${tutorial.name} ===`,
+      t.heading(`=== ${tutorial.name} ===`),
       "",
       tutorial.description,
       "",
     ];
     tutorial.steps.forEach((step, i) => {
-      lines.push(`Step ${i + 1}: ${step.title}`);
+      lines.push(t.heading(`Step ${i + 1}: ${step.title}`));
       lines.push(step.body);
       if (step.command) {
         lines.push("");
@@ -1002,6 +1231,9 @@ export function launchApp(opts: AppOptions = {}) {
       "/filter <field>:<val>  filter results (source, project, topic, tag, person)",
       "/sort <field>          sort results (created, updated, importance, confidence, access)",
       "/clearfilters          clear all filters and sort",
+      "/link <id>             link selected entry to another",
+      "/related               show related entries",
+      "/graph                 show relationship graph",
       "/new                   create new memory",
       "/recover               restore unsaved draft",
       "/telemetry             toggle usage stats (local only)",
@@ -1067,6 +1299,13 @@ export function launchApp(opts: AppOptions = {}) {
     handleCommand(value);
   });
 
+  inputBar.on("focus", () => updateContextHint("input"));
+  inputBar.on("blur", () => {
+    if (activeContext !== "modal" && activeContext !== "palette") {
+      updateContextHint("idle");
+    }
+  });
+
   inputBar.on("keypress", (_ch: unknown, key: any) => {
     if (key.name === "escape") {
       persistDraft();
@@ -1109,11 +1348,13 @@ export function launchApp(opts: AppOptions = {}) {
     recordUsage();
   }
 
-  const latest = await checkForUpdate("0.0.02");
-  if (latest) {
-    notify(`update: ${latest.slice(0, 20)}`);
-  } else {
-    statusBar.setContent(" ready ");
-  }
-  screen.render();
+  (async () => {
+    const latest = await checkForUpdate("0.0.02");
+    if (latest) {
+      notify(`update: ${latest.slice(0, 20)}`);
+    } else {
+      statusBar.setContent(" ready ");
+    }
+    screen.render();
+  })();
 }

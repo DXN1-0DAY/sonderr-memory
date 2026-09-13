@@ -4,6 +4,7 @@ import { safeTry } from "../../errors/tui-errors";
 import { truncate } from "../../utils/array";
 import { formatRelativeTime } from "../format";
 import { Theme, createTheme } from "../theme";
+import { tag } from "../format";
 
 export type SidebarOptions = {
   parent: any;
@@ -40,6 +41,7 @@ export function createSidebar(opts: SidebarOptions) {
     height: opts.height,
     border: theme.border,
     padding: opts.padding,
+    tags: true,
     style: {
       fg: theme.fg,
       bg: theme.bgPanel,
@@ -84,11 +86,16 @@ export function renderSidebarItems(
     grouped.set(key, arr);
   }
 
+  const theme = list?.style && (list.style as any).fg
+    ? createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } })
+    : createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const t = tag(theme);
+
   const items: string[] = [];
   const entryMap = new Map<number, MemoryEntry>();
   let idx = 0;
   for (const [group, groupEntries] of grouped) {
-    items.push(`── ${group} (${groupEntries.length}) ──`);
+    items.push(t.heading(`── ${group} (${groupEntries.length}) ──`));
     for (const entry of groupEntries.slice(0, 20)) {
       entryMap.set(idx, entry);
       items.push(`  ${formatSidebarEntry(entry)}`);

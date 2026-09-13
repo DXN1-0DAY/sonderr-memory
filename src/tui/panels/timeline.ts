@@ -18,11 +18,11 @@ function isPinned(entry: MemoryEntry): boolean {
   return entry.importance >= 0.8;
 }
 
-function formatTimelineEntry(entry: MemoryEntry): string {
+function formatTimelineEntry(entry: MemoryEntry, theme: Theme): string {
   const pinned = isPinned(entry) ? "[★] " : "";
   const age = formatRelativeTime(entry.createdAt);
   const title = entry.content.split("\n")[0].trim().slice(0, 48);
-  return `${pinned}${age} | ${entry.source} | ${title}`;
+  return `${pinned}{bold}${age}{/bold} | {fg-${theme.accent}}${entry.source}{/fg-${theme.accent}} | ${title}`;
 }
 
 export function createTimeline(opts: TimelineOptions) {
@@ -36,6 +36,7 @@ export function createTimeline(opts: TimelineOptions) {
     height: opts.height,
     border: theme.border,
     padding: opts.padding,
+    tags: true,
     style: {
       fg: theme.fg,
       bg: theme.bgPanel,
@@ -62,7 +63,7 @@ export function createTimeline(opts: TimelineOptions) {
 
   function render(entries: MemoryEntry[]) {
     withErrorHandling(() => {
-      const items = entries.map((entry) => formatTimelineEntry(entry));
+      const items = entries.map((entry) => formatTimelineEntry(entry, theme));
       list.setItems(items.length ? items : ["(empty)"]);
       list.select(0);
     }, () => {});

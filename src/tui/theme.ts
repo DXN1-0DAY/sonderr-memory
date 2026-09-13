@@ -11,6 +11,10 @@ export type Theme = {
   cancelFocus: string;
   error: string;
   success: string;
+  heading: string;
+  muted: string;
+  label: string;
+  divider: string;
 };
 
 export function createTheme(config: { theme: { bg: string; fg: string; accent: string } }): Theme {
@@ -26,6 +30,11 @@ export function createTheme(config: { theme: { bg: string; fg: string; accent: s
 
   const selectedFg = bg;
 
+  const heading = accent;
+  const muted = bg === "#f5f5f5" ? "#888888" : "#666666";
+  const label = accent;
+  const divider = accent;
+
   return {
     fg,
     bg,
@@ -39,5 +48,9 @@ export function createTheme(config: { theme: { bg: string; fg: string; accent: s
     cancelFocus: bg === "#f5f5f5" ? "#cccccc" : "#444444",
     error: "#ff5555",
     success: "#50fa7b",
+    heading,
+    muted,
+    label,
+    divider,
   };
 }
