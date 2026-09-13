@@ -28,6 +28,8 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 - **Private**: stored locally under `~/.sonderr-memory/`
 - **Agent-ready**: MCP / CLI interface for any coding agent
 - **Context export**: bounded-context snippets for agent prompts
+- **Smart ranking**: importance, confidence, access frequency, and recency scoring
+- **Token budgeting**: context window management with automatic compaction
 
 ## Install
 
@@ -66,6 +68,33 @@ sonderr-memory --help     # help
 | `Enter` | View entry |
 | `Up/Down` | Navigate sidebar |
 | `?` | Help |
+| `/` | Command mode |
+| `Tab` | Switch panels |
+
+### Command mode
+
+Press `/` in the TUI to open command mode. Available commands:
+
+- `/tutorial` - list tutorials
+- `/tutorial <id>` - run a tutorial
+- `/help` - show help
+
+### CLI commands
+
+```bash
+sonderr-memory remember "idea text"                    # save a memory
+sonderr-memory search "query"                          # search memories
+sonderr-memory list                                    # list all memories
+sonderr-memory timeline                               # recent memories
+sonderr-memory stats                                  # show statistics
+sonderr-memory context "query"                         # export context for agent
+sonderr-memory export "query"                          # export larger context
+sonderr-memory delete <id>                             # delete a memory
+sonderr-memory link <src> <dst>                        # link two memories
+sonderr-memory update <id> key=value ...               # update labels
+sonderr-memory mcp                                     # start MCP server
+sonderr-memory tutorial <id>                           # run a tutorial
+```
 
 ## Memory structure
 
@@ -89,6 +118,27 @@ sonderr-memory --help     # help
 - Every entry is a plain `.md` file with frontmatter
 - Append-only raw log. Curated summaries on top.
 - Fast grep, fast search, fast backup.
+- Importance and confidence scoring for better retrieval
+- Access tracking for frequently-used memories
+
+## Context window management
+
+sonderr-memory manages context windows intelligently:
+
+- **Token budgeting**: automatically reserves tokens for system prompts and responses
+- **Importance scoring**: high-importance memories are prioritized
+- **Confidence weighting**: high-confidence memories rank higher
+- **Access frequency**: frequently-accessed memories are surfaced first
+- **Recency boost**: recently accessed memories get a boost
+- **Automatic compaction**: fits the best memories within your token budget
+
+Example context export:
+
+```bash
+sonderr-memory context "mcp server setup"
+```
+
+This returns ranked, token-budgeted memories ready for agent injection.
 
 ## MCP Server
 
@@ -109,6 +159,18 @@ Tools exposed:
 - `sonderr_memory_context` - export context for agent
 - `sonderr_memory_stats` - get statistics
 - `sonderr_memory_timeline` - recent memories
+
+## Tutorials
+
+sonderr-memory includes interactive tutorials:
+
+```bash
+sonderr-memory tutorial mcp-setup     # MCP server setup guide
+sonderr-memory tutorial cli-usage     # CLI usage guide
+sonderr-memory tutorial tui-walkthrough # TUI walkthrough
+```
+
+In the TUI, press `/` then `tutorial` or `/tutorial <id>`.
 
 ## Development
 

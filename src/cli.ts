@@ -14,6 +14,7 @@ import {
 } from "./memory/store";
 import { MemoryEntry } from "./memory/types";
 import { getStoreRoot } from "./utils/store-helpers";
+import { getAllTutorials, getTutorial } from "./tutorial";
 
 type Command = (args: string[]) => void;
 
@@ -136,6 +137,37 @@ const commands: Record<string, Command> = {
       process.exit(1);
     });
   },
+  tutorial: (args) => {
+    const tutorialId = args[0];
+    if (!tutorialId) {
+      console.log("Available tutorials:");
+      for (const t of getAllTutorials()) {
+        console.log(`  ${t.id}: ${t.name}`);
+        console.log(`    ${t.description}`);
+      }
+      console.log("\nUsage: sonderr-memory tutorial <id>");
+      process.exit(0);
+    }
+    const tutorial = getTutorial(tutorialId);
+    if (!tutorial) {
+      console.error(`tutorial not found: ${tutorialId}`);
+      process.exit(1);
+    }
+    console.log(`\n=== ${tutorial.name} ===\n`);
+    console.log(tutorial.description);
+    console.log("");
+    tutorial.steps.forEach((step, i) => {
+      console.log(`Step ${i + 1}: ${step.title}`);
+      console.log(step.body);
+      if (step.command) {
+        console.log(`\n$ ${step.command}\n`);
+      }
+      if (step.hint) {
+        console.log(`Hint: ${step.hint}`);
+      }
+      console.log("");
+    });
+  },
   help: () => {
     console.log(`
 sonderr-memory - local-first context engine
@@ -153,7 +185,13 @@ commands:
   link <src> <dst>     link two memories
   update <id> k=v...   update labels
   mcp, serve           start MCP server
+  tutorial <id>        run a tutorial
   help                 show this help
+
+tutorials:
+  mcp-setup            MCP server setup guide
+  cli-usage            CLI usage guide
+  tui-walkthrough      TUI walkthrough
 
 env:
   SONDERR_MEMORY_ROOT  memory root (default: ~/.sonderr-memory)

@@ -1,8 +1,9 @@
-import { MemoryEntry, MemoryStore, MemoryMeta } from "./types";
+import { MemoryEntry, MemoryStore, MemoryMeta, ContextBudget, ContextPlan, ContextItem } from "./types";
 import * as path from "path";
 import * as fs from "fs";
 import { logger } from "../logger";
 import { ensureStore, ensureDirs } from "../utils/store-helpers";
+import { groupBy, deduplicate } from "../utils/array";
 
 const ROOT = (process.env.SONDERR_MEMORY_ROOT || (process.env.HOME ? `${process.env.HOME}/.sonderr-memory` : "/tmp/.sonderr-memory"));
 ensureStore(ROOT);
@@ -62,6 +63,10 @@ export function saveEntry(
     people: [],
     tags: [],
     linkedIds: [],
+    importance: extra.importance ?? 0.5,
+    confidence: extra.confidence ?? 0.8,
+    accessCount: 0,
+    lastAccessedAt: now,
     ...extra,
   };
 
@@ -99,8 +104,12 @@ export function saveEntry(
     extra.project ? `project: ${extra.project}` : "",
     extra.topics?.length ? `topics: ${extra.topics.join(", ")}` : "",
     extra.people?.length ? `people: ${extra.people.join(", ")}` : "",
-    extra.tags?.length ? `tags: ${extra.tags.join(", ")}` : "",
-    extra.linkedIds?.length ? `linkedIds: ${extra.linkedIds.join(", ")}` : "",
+    extra.tags?.length ? `tags: ${entry.tags.join(", ")}` : "",
+    extra.linkedIds?.length ? `linkedIds: ${entry.linkedIds.join(", ")}` : "",
+    `importance: ${entry.importance}`,
+    `confidence: ${entry.confidence}`,
+    `accessCount: ${entry.accessCount}`,
+    `lastAccessedAt: ${entry.lastAccessedAt}`,
     "---",
     "",
     content,
@@ -143,15 +152,21 @@ export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[
   } else {
     walk(store.root);
   }
-  return entries;
+  return deduplicate(entries, (e) => e.id);
 }
 
 export function searchEntries(store: MemoryStore, query: string): MemoryEntry[] {
   const q = query.toLowerCase();
-  return loadEntries(store).filter((entry) => {
+  const words = q.split(/\W+/).filter((w) => w.length > 2);
+  return loadEntries(store).map((entry) => {
     const hay = `${entry.content} ${entry.topics.join(" ")} ${entry.tags.join(" ")} ${entry.people.join(" ")} ${entry.project ?? ""}`.toLowerCase();
-    return hay.includes(q);
-  });
+    let score = 0;
+    if (hay.includes(q)) score += 10;
+    for (const w of words) {
+      if (hay.includes(w)) score += 2;
+    }
+    return { entry, score };
+  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).map((x) => x.entry);
 }
 
 export function getMeta(store: MemoryStore): MemoryMeta {
@@ -160,13 +175,17 @@ export function getMeta(store: MemoryStore): MemoryMeta {
   const byProject: Record<string, number> = {};
   const byTopic: Record<string, number> = {};
   const recentIds: string[] = [];
+  const accessCounts: Array<{ id: string; count: number }> = [];
 
   for (const entry of entries) {
     bySource[entry.source] = (bySource[entry.source] || 0) + 1;
     if (entry.project) byProject[entry.project] = (byProject[entry.project] || 0) + 1;
     for (const topic of entry.topics) byTopic[topic] = (byTopic[topic] || 0) + 1;
     if (recentIds.length < 20) recentIds.push(entry.id);
+    accessCounts.push({ id: entry.id, count: entry.accessCount });
   }
+
+  const topAccessed = accessCounts.sort((a, b) => b.count - a.count).slice(0, 10).map((x) => x.id);
 
   return {
     total: entries.length,
@@ -174,6 +193,7 @@ export function getMeta(store: MemoryStore): MemoryMeta {
     byProject,
     byTopic,
     recentIds,
+    topAccessed,
   };
 }
 
@@ -197,20 +217,79 @@ export function getRelated(store: MemoryStore, entry: MemoryEntry, limit = 10): 
     for (const w of entry.content.toLowerCase().split(/\W+/).filter((w) => w.length > 3)) {
       if (commonWords.has(w)) s += 1;
     }
+    s += e.importance * 2;
+    s += e.confidence;
+    s += Math.min(e.accessCount / 10, 1);
     return s;
   };
   return all.sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 
-export function exportForContext(store: MemoryStore, query: string, maxTokens = 2000): string {
-  const results = searchEntries(store, query).slice(0, 5);
-  const parts: string[] = [];
+export function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+export function buildContextPlan(store: MemoryStore, query: string, budget: ContextBudget): ContextPlan {
+  const candidates = searchEntries(store, query).slice(0, 50);
+  const scored: ContextItem[] = [];
+  const usedIds = new Set<string>();
+
+  for (const entry of candidates) {
+    if (usedIds.has(entry.id)) continue;
+    usedIds.add(entry.id);
+
+    let score = 0;
+    let reason = "";
+
+    if (entry.importance > 0.8) {
+      score += 5;
+      reason += "high-importance ";
+    }
+    if (entry.confidence > 0.9) {
+      score += 3;
+      reason += "high-confidence ";
+    }
+    if (entry.accessCount > 5) {
+      score += Math.min(entry.accessCount, 10);
+      reason += "frequently-accessed ";
+    }
+    score += entry.importance * 4;
+    score += entry.confidence * 2;
+    score += Math.min(entry.accessCount / 2, 5);
+
+    const daysSinceAccess = (Date.now() - new Date(entry.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceAccess < 1) score += 2;
+
+    const tokens = estimateTokens(entry.content);
+    scored.push({ entry, score, reason: reason.trim() || "relevance", tokens });
+  }
+
+  const sorted = scored.sort((a, b) => b.score - a.score);
+  const selected: ContextItem[] = [];
   let total = 0;
-  for (const entry of results) {
-    const snippet = `[${entry.source}] ${entry.project ?? ""} ${entry.topics.join(" ")}\n${entry.content}\n`;
-    if (total + snippet.length > maxTokens) break;
+
+  for (const item of sorted) {
+    if (total + item.tokens > budget.availableForMemory) break;
+    selected.push(item);
+    total += item.tokens;
+  }
+
+  return { query, items: selected, totalTokens: total, budget };
+}
+
+export function exportForContext(store: MemoryStore, query: string, maxTokens = 2000): string {
+  const plan = buildContextPlan(store, query, {
+    maxTokens,
+    reservedForSystem: 200,
+    reservedForResponse: 400,
+    availableForMemory: Math.max(100, maxTokens - 600),
+  });
+
+  const parts: string[] = [];
+  for (const item of plan.items) {
+    const snippet = `[${item.entry.source}] ${item.entry.project ?? ""} ${item.entry.topics.join(" ")} (score: ${item.score.toFixed(1)}, reason: ${item.reason})\n${item.entry.content}\n`;
     parts.push(snippet);
-    total += snippet.length;
+    touchEntry(store, item.entry);
   }
   return parts.join("\n---\n");
 }
@@ -228,6 +307,10 @@ export function updateEntry(store: MemoryStore, entry: MemoryEntry, patch: Parti
     updated.people?.length ? `people: ${updated.people.join(", ")}` : "",
     updated.tags?.length ? `tags: ${updated.tags.join(", ")}` : "",
     updated.linkedIds?.length ? `linkedIds: ${updated.linkedIds.join(", ")}` : "",
+    `importance: ${updated.importance}`,
+    `confidence: ${updated.confidence}`,
+    `accessCount: ${updated.accessCount}`,
+    `lastAccessedAt: ${updated.lastAccessedAt}`,
     "---",
     "",
     updated.content,
@@ -255,6 +338,30 @@ export function linkEntries(store: MemoryStore, source: MemoryEntry, target: Mem
   return updatedSource;
 }
 
+export function touchEntry(store: MemoryStore, entry: MemoryEntry): MemoryEntry {
+  return updateEntry(store, entry, {
+    accessCount: entry.accessCount + 1,
+    lastAccessedAt: new Date().toISOString(),
+  });
+}
+
+export function suggestTags(store: MemoryStore, entry: MemoryEntry, limit = 5): string[] {
+  const related = getRelated(store, entry, 20);
+  const tagCounts: Record<string, number> = {};
+  for (const r of related) {
+    for (const tag of r.tags) {
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+    }
+    for (const topic of r.topics) {
+      tagCounts[topic] = (tagCounts[topic] || 0) + 1;
+    }
+  }
+  return Object.entries(tagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([tag]) => tag);
+}
+
 function parseEntry(fullPath: string, text: string): MemoryEntry {
   const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   const frontmatter = fmMatch?.[1] ?? "";
@@ -278,5 +385,9 @@ function parseEntry(fullPath: string, text: string): MemoryEntry {
     source: (meta.source as MemoryEntry["source"]) || "inbox",
     linkedIds: meta.linkedIds ? meta.linkedIds.split(",").map((s) => s.trim()) : [],
     content,
+    importance: Number(meta.importance) || 0.5,
+    confidence: Number(meta.confidence) || 0.8,
+    accessCount: Number(meta.accessCount) || 0,
+    lastAccessedAt: meta.lastAccessedAt || new Date().toISOString(),
   };
 }

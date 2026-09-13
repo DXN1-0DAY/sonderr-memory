@@ -6,6 +6,7 @@ import { createMetadataPanel } from "./panels/metadata";
 import { createTimeline } from "./panels/timeline";
 import { showCreateMemoryForm, showEditLabelsForm, showSearchPrompt } from "./forms";
 import { withErrorHandling } from "../errors/tui-errors";
+import { getAllTutorials, getTutorial } from "../tutorial";
 
 export type AppOptions = {
   store?: MemoryStore;
@@ -199,6 +200,7 @@ export function launchApp(opts: AppOptions = {}) {
         "Up/Down    navigate sidebar / timeline",
         "Tab        switch panels",
         "Enter      view entry",
+        "/          command mode",
         "",
         "PANELS",
         "",
@@ -213,6 +215,82 @@ export function launchApp(opts: AppOptions = {}) {
     }, () => {
       statusBar.setContent(" error showing help ");
     });
+  }
+
+  function handleCommandMode() {
+    const prompt = require("blessed").prompt({
+      parent: screen,
+      top: "center",
+      left: "center",
+      width: "50%",
+      height: "shrink",
+      border: { type: "line", fg: "#FF6A00" },
+      label: " command ",
+      style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+      keys: true,
+      mouse: true,
+    } as any);
+
+    (prompt as any).input("command", (err: Error | null, value: string) => {
+      withErrorHandling(() => {
+        prompt.destroy();
+        if (!value) return;
+        const trimmed = value.trim();
+        if (trimmed === "/tutorial" || trimmed === "tutorial") {
+          showTutorialList();
+        } else if (trimmed.startsWith("/tutorial ")) {
+          const tutorialId = trimmed.split(" ")[1];
+          showTutorial(tutorialId);
+        } else if (trimmed === "/help" || trimmed === "help") {
+          handleHelp();
+        } else {
+          statusBar.setContent(` unknown command: ${trimmed} `);
+          screen.render();
+        }
+      }, () => {
+        prompt.destroy();
+        screen.render();
+      });
+    });
+
+    screen.render();
+  }
+
+  function showTutorialList() {
+    const tutorials = getAllTutorials();
+    const items = tutorials.map((t) => `${t.id}: ${t.name} - ${t.description}`);
+    editor.box.setContent(["Available tutorials:", "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
+    screen.render();
+  }
+
+  function showTutorial(id: string) {
+    const tutorial = getTutorial(id);
+    if (!tutorial) {
+      statusBar.setContent(` tutorial not found: ${id} `);
+      screen.render();
+      return;
+    }
+    const lines: string[] = [
+      `=== ${tutorial.name} ===`,
+      "",
+      tutorial.description,
+      "",
+    ];
+    tutorial.steps.forEach((step, i) => {
+      lines.push(`Step ${i + 1}: ${step.title}`);
+      lines.push(step.body);
+      if (step.command) {
+        lines.push("");
+        lines.push(`$ ${step.command}`);
+      }
+      if (step.hint) {
+        lines.push(`Hint: ${step.hint}`);
+      }
+      lines.push("");
+    });
+    editor.box.setContent(lines.join("\n"));
+    statusBar.setContent(` tutorial: ${tutorial.name} `);
+    screen.render();
   }
 
   function handleRefresh() {
@@ -247,6 +325,7 @@ export function launchApp(opts: AppOptions = {}) {
   screen.key(["c-x"], handleContextPreview);
   screen.key(["c-r"], handleRefresh);
   screen.key(["c-q", "C-c"], handleQuit);
+  screen.key(["/"], handleCommandMode);
   screen.key(["tab"], () => {
     withErrorHandling(() => {
       const focused = screen.focused;
