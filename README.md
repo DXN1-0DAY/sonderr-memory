@@ -1,6 +1,6 @@
 <div align="center">
 
-[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.10-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
+[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.11-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
 
 # sonderr-memory
 
@@ -63,31 +63,44 @@ sonderr-memory --help     # help
 sonderr-memory mcp        # start MCP server
 ```
 
-### TUI hotkeys
+### TUI
 
+sonderr-memory launches a clean, minimal TUI by default. No clutter, no complex panels.
+
+```
+sonderr-memory            # launch TUI
+```
+
+**Layout:**
+- Main area: clean content view with welcome screen
+- Bottom: command input bar
+- Status bar: current state and feedback
+
+**Command palette:**
+Press `/` to open the command palette with autocomplete suggestions.
+
+**Available commands:**
+- `/tutorial` - list tutorials
+- `/tutorial <id>` - run tutorial
+- `/help` - show help
+- `/mcp` - start MCP server
+- `/stats` - show statistics
+- `/timeline` - show recent memories
+- `/clear` - clear screen
+- `/search <query>` - search memories
+- `/new` - create new memory
+- `/quit` - quit
+
+**Shortcuts:**
 | Key | Action |
 |-----|--------|
 | `Ctrl+N` | New memory |
 | `Ctrl+S` | Search |
 | `Ctrl+R` | Refresh |
 | `Ctrl+Q` | Quit |
-| `Enter` | View entry |
-| `Up/Down` | Navigate sidebar |
+| `Tab` | Focus command bar |
 | `?` | Help |
-| `/` | Command mode |
-| `Tab` | Switch panels |
-
-### Command mode
-
-Press `/` in the TUI to open the command bar. Available commands:
-
-- `/tutorial` - list tutorials
-- `/tutorial <id>` - run tutorial
-- `/help` - show help
-- `/mcp` - start MCP server
-- `/stats` - show stats
-- `/timeline` - show timeline
-- `/clear` - clear editor
+| `/` | Command palette |
 
 ### CLI commands
 
