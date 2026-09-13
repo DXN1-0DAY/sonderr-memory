@@ -1,7 +1,7 @@
 <div align="center">
 
 <img src="https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge" alt="sonderr-memory"/>
-[![Version](https://img.shields.io/badge/version-0.0.02-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases)
+[![Version](https://img.shields.io/badge/version-0.0.03-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases)
 [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh)
 [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
