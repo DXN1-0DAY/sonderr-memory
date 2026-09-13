@@ -158,7 +158,7 @@ export function callTool(name: string, args: Record<string, unknown>): MCPRespon
       const query = String(args.query || "");
       const limit = Number(args.limit) || 20;
       const results = searchEntries(store, query).slice(0, limit);
-      return { content: [{ type: "text", text: JSON.stringify(results.map((r) => ({ id: r.id, source: r.source, project: r.project, topics: r.topics, content: r.content.slice(0, 200) })), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(results.map((r) => ({ id: r.entry.id, source: r.entry.source, project: r.entry.project, topics: r.entry.topics, content: r.entry.content.slice(0, 200), score: r.score, matchedFields: r.matchedFields })), null, 2) }] };
     }
 
     case "sonderr_memory_list": {

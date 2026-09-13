@@ -388,11 +388,13 @@ const commands: Record<string, CommandHandler> = {
     return {
       ok: true,
       data: results.map(r => ({
-        id: r.id,
-        source: r.source,
-        content: r.content.slice(0, 100),
-        ...(r.project ? { project: r.project } : {}),
-        ...(r.topics.length ? { topics: r.topics } : {}),
+        id: r.entry.id,
+        source: r.entry.source,
+        content: r.entry.content.slice(0, 100),
+        ...(r.entry.project ? { project: r.entry.project } : {}),
+        ...(r.entry.topics.length ? { topics: r.entry.topics } : {}),
+        score: r.score,
+        matchedFields: r.matchedFields,
       })),
     };
   },

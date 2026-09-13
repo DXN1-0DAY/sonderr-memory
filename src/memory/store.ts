@@ -1,4 +1,5 @@
-import { MemoryEntry, MemoryStore, MemoryMeta, ContextBudget, ContextPlan, ContextItem } from "./types";
+import { MemoryEntry, MemoryStore, MemoryMeta, ContextBudget, ContextPlan, ContextItem, TagStats, ScoredSearchResult } from "./types";
+export type { ScoredSearchResult } from "./types";
 import * as path from "path";
 import * as fs from "fs";
 import { logger } from "../logger";
@@ -245,54 +246,120 @@ export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[
   return Array.from(byId.values());
 }
 
-export function searchEntries(store: MemoryStore, query: string): MemoryEntry[] {
+export function searchEntries(store: MemoryStore, query: string): ScoredSearchResult[] {
   const q = query.toLowerCase().trim();
   if (!q) return [];
 
-  const fieldWeights = {
-    project: 8,
-    topic: 4,
-    tag: 3,
-    people: 3,
-    content: 1,
-  };
+  const fieldWeights = { project: 8, topic: 4, tag: 3, people: 3, content: 1 };
   const exactPhraseBonus = 20;
   const wordLengthBonus = 0.5;
-  const lengthNormalization = true;
+  const fuzzyThreshold = 0.78;
+  const typoTolerance = 2;
 
   const queryWords = q.split(/\W+/).filter((w) => w.length > 0);
   if (queryWords.length === 0) return [];
 
+  const levenshtein = (a: string, b: string): number => {
+    const m = a.length;
+    const n = b.length;
+    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  };
+
+  const tokenSimilarity = (a: string, b: string): number => {
+    const maxLen = Math.max(a.length, b.length, 1);
+    return 1 - levenshtein(a, b) / maxLen;
+  };
+
   return loadEntries(store).map((entry) => {
     const contentLower = entry.content.toLowerCase();
     const haystack = `${entry.project ?? ""} ${entry.topics.join(" ")} ${entry.tags.join(" ")} ${entry.people.join(" ")} ${contentLower}`;
+    const matchFields: string[] = [];
     let score = 0;
 
     if (haystack.includes(q)) {
       score += exactPhraseBonus;
+      matchFields.push("exact");
     }
 
     for (const word of queryWords) {
       if (word.length <= 2) continue;
       let wordScore = 0;
-      if (entry.project?.toLowerCase() === word) wordScore += fieldWeights.project;
-      for (const t of entry.topics) if (t.toLowerCase() === word) wordScore += fieldWeights.topic;
-      for (const t of entry.tags) if (t.toLowerCase() === word) wordScore += fieldWeights.tag;
-      for (const p of entry.people) if (p.toLowerCase() === word) wordScore += fieldWeights.people;
-      if (contentLower.includes(word)) wordScore += fieldWeights.content;
+      const wLower = word.toLowerCase();
+
+      if (entry.project && tokenSimilarity(entry.project.toLowerCase(), wLower) >= fuzzyThreshold) {
+        wordScore += fieldWeights.project;
+        matchFields.push("project");
+      }
+      for (const t of entry.topics) {
+        if (tokenSimilarity(t.toLowerCase(), wLower) >= fuzzyThreshold) {
+          wordScore += fieldWeights.topic;
+          if (!matchFields.includes("topic")) matchFields.push("topic");
+        }
+      }
+      for (const t of entry.tags) {
+        if (tokenSimilarity(t.toLowerCase(), wLower) >= fuzzyThreshold) {
+          wordScore += fieldWeights.tag;
+          if (!matchFields.includes("tag")) matchFields.push("tag");
+        }
+      }
+      for (const p of entry.people) {
+        if (tokenSimilarity(p.toLowerCase(), wLower) >= fuzzyThreshold) {
+          wordScore += fieldWeights.people;
+          if (!matchFields.includes("people")) matchFields.push("people");
+        }
+      }
+
+      if (contentLower.includes(wLower)) {
+        wordScore += fieldWeights.content;
+        if (!matchFields.includes("content")) matchFields.push("content");
+      } else {
+        const cWords = contentLower.split(/\W+/);
+        for (const cw of cWords) {
+          if (cw.length >= 3 && tokenSimilarity(cw, wLower) >= fuzzyThreshold) {
+            wordScore += fieldWeights.content * 0.8;
+            if (!matchFields.includes("content")) matchFields.push("content");
+            break;
+          }
+        }
+      }
+
+      if (word.length >= 4) {
+        const hWords = haystack.split(/\W+/);
+        for (const hw of hWords) {
+          if (hw.length >= word.length - typoTolerance && hw.length <= word.length + typoTolerance) {
+            const dist = levenshtein(wLower, hw.toLowerCase());
+            if (dist > 0 && dist <= typoTolerance) {
+              wordScore += Math.max(1, fieldWeights.content * (1 - dist / (word.length + 1)));
+              if (!matchFields.includes("content")) matchFields.push("content");
+              break;
+            }
+          }
+        }
+      }
+
       wordScore += word.length * wordLengthBonus;
       score += wordScore;
     }
 
-    if (lengthNormalization) {
-      score /= Math.log2(entry.content.length + 1);
-    }
+    const maxPossible = Math.max(1, queryWords.length * (exactPhraseBonus + Math.max(...Object.values(fieldWeights))));
+    const normalizedScore = Math.round((score / maxPossible) * 100);
 
-    const matchedCount = queryWords.filter((w) => haystack.includes(w)).length;
-    score *= matchedCount / queryWords.length;
-
-    return { entry, score };
-  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).map((x) => x.entry);
+    return {
+      entry,
+      score: normalizedScore,
+      matchedFields: matchFields.length > 0 ? matchFields : ["content"],
+    };
+  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
 }
 
 export function getMeta(store: MemoryStore): MemoryMeta {
@@ -351,6 +418,28 @@ export function getRelated(store: MemoryStore, entry: MemoryEntry, limit = 10): 
   return all.sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 
+export function getBacklinks(store: MemoryStore, entry: MemoryEntry, limit = 10): MemoryEntry[] {
+  const all = loadEntries(store);
+  return all
+    .filter((e) => e.id !== entry.id && e.linkedIds.includes(entry.id))
+    .sort((a, b) => (b.importance * b.confidence) - (a.importance * a.confidence))
+    .slice(0, limit);
+}
+
+export function suggestLinks(store: MemoryStore, entry: MemoryEntry, limit = 5): MemoryEntry[] {
+  const candidates = getRelated(store, entry, 50).filter((e) => e.id !== entry.id && !e.linkedIds.includes(entry.id));
+  const scored = candidates.map((e) => {
+    let s = 0;
+    if (e.project === entry.project) s += 3;
+    for (const t of entry.topics) if (e.topics.includes(t)) s += 2;
+    for (const tag of entry.tags) if (e.tags.includes(tag)) s += 1;
+    s += e.importance * 2;
+    s += e.confidence;
+    return { entry: e, score: s };
+  });
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.entry);
+}
+
 const MAX_CONTENT_SNIPPET = 600;
 
 export function estimateTokens(text: string): number {
@@ -362,7 +451,8 @@ export function buildContextPlan(store: MemoryStore, query: string, budget: Cont
   const scored: ContextItem[] = [];
   const usedIds = new Set<string>();
 
-  for (const entry of candidates) {
+  for (const candidate of candidates) {
+    const entry = candidate.entry;
     if (usedIds.has(entry.id)) continue;
     usedIds.add(entry.id);
 
@@ -457,6 +547,7 @@ export function exportForContext(store: MemoryStore, query: string, maxTokens = 
 
 export function updateEntry(store: MemoryStore, entry: MemoryEntry, patch: Partial<MemoryEntry>): MemoryEntry {
   const updated = { ...entry, ...patch, updatedAt: new Date().toISOString() };
+  if (updated.tags) updated.tags = normalizeTags(updated.tags);
   const frontmatterLines = [
     `id: ${updated.id}`,
     `createdAt: ${updated.createdAt}`,
@@ -519,6 +610,65 @@ export function suggestTags(store: MemoryStore, entry: MemoryEntry, limit = 5): 
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([tag]) => tag);
+}
+
+export function normalizeTag(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+export function normalizeTags(raw: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const tag of raw) {
+    const n = normalizeTag(tag);
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      result.push(n);
+    }
+  }
+  return result;
+}
+
+export function extractContentTags(content: string, existingTags: string[], limit = 5): string[] {
+  const words = content.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+  const freq = new Map<string, number>();
+  for (const w of words) {
+    freq.set(w, (freq.get(w) || 0) + 1);
+  }
+  const existing = new Set(existingTags.map((t) => t.toLowerCase()));
+  return Array.from(freq.entries())
+    .filter(([w]) => !existing.has(w))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([w]) => w);
+}
+
+export function getAllTags(store: MemoryStore): Map<string, number> {
+  const entries = loadEntries(store);
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    for (const tag of entry.tags) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+export function getTagStats(store: MemoryStore): TagStats {
+  const tagCounts = getAllTags(store);
+  const sorted = Array.from(tagCounts.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count);
+  return {
+    total: sorted.reduce((sum, t) => sum + t.count, 0),
+    unique: sorted.length,
+    top: sorted.slice(0, 20),
+    orphans: sorted.filter((t) => t.count === 1),
+  };
 }
 
 export function parseEntry(fullPath: string, text: string): MemoryEntry {

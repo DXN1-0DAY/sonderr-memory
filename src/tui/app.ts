@@ -760,7 +760,7 @@ export function launchApp(opts: AppOptions = {}) {
           saveSessionState(store, { lastQuery: value });
           const results = searchEntries(store, value);
           if (results.length > 0) {
-            showEntry(results[0]);
+            showEntry(results[0].entry);
             setStatus(` search: ${value} (${results.length} results) `);
           } else {
             notify(`no results: ${value.slice(0, 20)}`);
@@ -1131,7 +1131,7 @@ export function launchApp(opts: AppOptions = {}) {
         saveSessionState(store, { lastQuery: query });
         const results = searchEntries(store, query);
         if (results.length > 0) {
-          showEntry(results[0]);
+          showEntry(results[0].entry);
           setStatus(` search: ${query} (${results.length} results) `);
           flashStatusBar();
         } else {
@@ -1419,7 +1419,7 @@ export function launchApp(opts: AppOptions = {}) {
   } else if (session?.lastQuery) {
     const results = searchEntries(store, session.lastQuery);
     if (results.length > 0) {
-      showEntry(results[0]);
+      showEntry(results[0].entry);
       notify(`restored search: ${session.lastQuery.slice(0, 20)}`);
     }
   }

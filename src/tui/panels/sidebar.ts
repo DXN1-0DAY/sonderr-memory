@@ -21,14 +21,17 @@ function isPinned(entry: MemoryEntry): boolean {
   return entry.importance >= 0.8;
 }
 
-function formatSidebarEntry(entry: MemoryEntry, theme: Theme): string {
+function formatSidebarEntry(entry: MemoryEntry, theme: Theme, highlight = false): string {
   const pinned = isPinned(entry) ? `{fg-${theme.accent}}[★]{/fg-${theme.accent}}` : "    ";
   const link = entry.linkedIds.length > 0 ? `{fg-${theme.muted}}↗{/fg-${theme.muted}}` : " ";
   const id = entry.id.slice(0, 8);
   const source = entry.source.padEnd(9);
   const title = truncate(entry.content.split("\n")[0].trim(), 18);
   const time = formatRelativeTime(entry.updatedAt);
-  return `${pinned}${link} ${id} | ${source} | ${title} | {fg-${theme.muted}}${time}{/fg-${theme.muted}}`;
+  const tagPreview = entry.tags.length > 0 ? `{fg-${theme.muted}}#${entry.tags[0]}{/fg-${theme.muted}}` : "";
+  const hl = highlight ? `{fg-${theme.accent}}` : "";
+  const hlClose = highlight ? `{/fg-${theme.accent}}` : "";
+  return `${pinned}${link} ${hl}${id} | ${source} | ${title}${tagPreview ? " | " + tagPreview : ""} | {fg-${theme.muted}}${time}{/fg-${theme.muted}}${hlClose}`;
 }
 
 export function createSidebar(opts: SidebarOptions) {
@@ -84,14 +87,19 @@ export function renderSidebarItems(
   list: any,
   entries: MemoryEntry[],
   getGroup: (entry: MemoryEntry) => string,
-  theme?: Theme
+  getSubGroup?: (entry: MemoryEntry) => string | undefined,
+  theme?: Theme,
+  searchMatches?: Map<string, { score: number; matchedFields: string[] }>
 ) {
-  const grouped = new Map<string, MemoryEntry[]>();
+  const groups = new Map<string, Map<string | undefined, MemoryEntry[]>>();
   for (const entry of entries) {
-    const key = getGroup(entry);
-    const arr = grouped.get(key) || [];
+    const groupKey = getGroup(entry);
+    const subKey = getSubGroup ? getSubGroup(entry) : undefined;
+    const groupMap = groups.get(groupKey) || new Map<string | undefined, MemoryEntry[]>();
+    const arr = groupMap.get(subKey) || [];
     arr.push(entry);
-    grouped.set(key, arr);
+    groupMap.set(subKey, arr);
+    groups.set(groupKey, groupMap);
   }
 
   const resolvedTheme = theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
@@ -103,35 +111,60 @@ export function renderSidebarItems(
   let firstEntryIdx = -1;
   const prevSelectedId = list._selectedEntryId;
 
-  for (const [group, groupEntries] of grouped) {
-    items.push(t.heading(`── ${group} (${groupEntries.length}) ──`));
+  for (const [group, groupMap] of groups) {
+    items.push(t.heading(`── ${group} ──`));
     visualIdx++;
-    for (const entry of groupEntries.slice(0, 20)) {
-      if (firstEntryIdx === -1) firstEntryIdx = visualIdx;
-      entryMap.set(visualIdx, entry);
-      items.push(`  ${formatSidebarEntry(entry, resolvedTheme)}`);
-      visualIdx++;
+    const sortedSubKeys = Array.from(groupMap.keys()).sort((a, b) => {
+      if (a === undefined) return 1;
+      if (b === undefined) return -1;
+      return a.localeCompare(b);
+    });
+    for (const subKey of sortedSubKeys) {
+      if (subKey !== undefined) {
+        const count = (groupMap.get(subKey) || []).length;
+        items.push(`  {fg-${resolvedTheme.muted}}└ ${subKey} (${count}){/fg-${resolvedTheme.muted}}`);
+        visualIdx++;
+      }
+      for (const entry of (groupMap.get(subKey) || []).slice(0, 20)) {
+        if (firstEntryIdx === -1) firstEntryIdx = visualIdx;
+        entryMap.set(visualIdx, entry);
+        const indent = subKey !== undefined ? "    " : "  ";
+        const isMatch = searchMatches ? searchMatches.has(entry.id) : false;
+        items.push(`${indent}${formatSidebarEntry(entry, resolvedTheme, isMatch)}`);
+        visualIdx++;
+      }
     }
   }
 
   safeTry(() => {
-    list.setItems(items.length ? items : ["(empty)"]);
-    let selectedId: string | undefined;
-    if (prevSelectedId) {
-      for (const [idx, entry] of entryMap) {
-        if (entry.id === prevSelectedId) {
-          list.select(idx);
-          selectedId = prevSelectedId;
-          break;
+    if (entries.length === 0) {
+      list.setItems([
+        "  (no memories yet)",
+        "",
+        "  Ctrl+N  create first memory",
+        "  /       open command palette",
+      ]);
+      list._entryMap = new Map();
+      list._selectedEntryId = undefined;
+    } else {
+      list.setItems(items.length ? items : ["(empty)"]);
+      let selectedId: string | undefined;
+      if (prevSelectedId) {
+        for (const [idx, entry] of entryMap) {
+          if (entry.id === prevSelectedId) {
+            list.select(idx);
+            selectedId = prevSelectedId;
+            break;
+          }
         }
       }
+      if (!selectedId && firstEntryIdx >= 0) {
+        list.select(firstEntryIdx);
+        const firstEntry = entryMap.get(firstEntryIdx);
+        if (firstEntry) selectedId = firstEntry.id;
+      }
+      list._entryMap = entryMap;
+      list._selectedEntryId = selectedId;
     }
-    if (!selectedId && firstEntryIdx >= 0) {
-      list.select(firstEntryIdx);
-      const firstEntry = entryMap.get(firstEntryIdx);
-      if (firstEntry) selectedId = firstEntry.id;
-    }
-    list._entryMap = entryMap;
-    list._selectedEntryId = selectedId;
   }, undefined);
 }

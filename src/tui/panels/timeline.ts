@@ -13,17 +13,23 @@ export type TimelineOptions = {
   theme?: Theme;
   padding?: { top?: number; bottom?: number; left?: number; right?: number };
   onSelect?: (entry: MemoryEntry) => void;
+  searchMatches?: Map<string, { score: number; matchedFields: string[] }>;
 };
 
 function isPinned(entry: MemoryEntry): boolean {
   return entry.importance >= 0.8;
 }
 
-function formatTimelineEntry(entry: MemoryEntry, theme: Theme): string {
+function formatTimelineEntry(
+  entry: MemoryEntry,
+  theme: Theme,
+  matchInfo?: { score: number; matchedFields: string[] }
+): string {
   const pinned = isPinned(entry) ? "[★] " : "";
   const age = formatRelativeTime(entry.createdAt);
   const title = (entry.content || "").split("\n")[0].trim().slice(0, 48);
-  return `${pinned}{bold}${age}{/bold} | {fg-${theme.accent}}${entry.source}{/fg-${theme.accent}} | ${title}`;
+  const matchBadge = matchInfo ? `{fg-${theme.accent}}[${String(matchInfo.score).padStart(3)}%]{/fg-${theme.accent}} ` : "";
+  return `${pinned}{bold}${age}{/bold} | {fg-${theme.accent}}${entry.source}{/fg-${theme.accent}} | ${matchBadge}${title}`;
 }
 
 export function createTimeline(opts: TimelineOptions) {
@@ -77,7 +83,8 @@ export function createTimeline(opts: TimelineOptions) {
   function render(entries: MemoryEntry[]) {
     withErrorHandling(() => {
       entryMap.clear();
-      const items = entries.map((entry) => formatTimelineEntry(entry, theme));
+      const searchMatches = (list as any)._searchMatches as Map<string, { score: number; matchedFields: string[] }> | undefined;
+      const items = entries.map((entry) => formatTimelineEntry(entry, theme, searchMatches?.get(entry.id)));
       if (items.length === 0) {
         list.setItems(["(empty)"]);
       } else {
@@ -92,5 +99,5 @@ export function createTimeline(opts: TimelineOptions) {
     }, () => {});
   }
 
-  return { list, render };
+  return { list, render, setSearchMatches(matches: Map<string, { score: number; matchedFields: string[] }>) { (list as any)._searchMatches = matches; } };
 }

@@ -79,6 +79,12 @@ export type SearchOptions = {
   lengthNormalization?: boolean;
 };
 
+export type ScoredSearchResult = {
+  entry: MemoryEntry;
+  score: number;
+  matchedFields: string[];
+};
+
 export type SimilarityResult = {
   entry: MemoryEntry;
   score: number;
@@ -152,6 +158,18 @@ export type DecayConfig = {
   accessResilience: number;
   maxImportance: number;
   minImportance: number;
+};
+
+export type TagInfo = {
+  tag: string;
+  count: number;
+};
+
+export type TagStats = {
+  total: number;
+  unique: number;
+  top: TagInfo[];
+  orphans: TagInfo[];
 };
 
 export const DEFAULT_DECAY_CONFIG: DecayConfig = {

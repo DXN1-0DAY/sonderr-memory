@@ -34,6 +34,16 @@ function addFormKeys(form: any, fields: any[], saveBtn: any, cancelBtn: any) {
         const prev = fields.at(idx - 1) || fields.at(-1);
         (prev as any).focus();
         (form.parent as any).render();
+      } else if (key.name === "j") {
+        const idx = fields.indexOf(el);
+        const next = fields.at(idx + 1) || fields[0];
+        (next as any).focus();
+        (form.parent as any).render();
+      } else if (key.name === "k") {
+        const idx = fields.indexOf(el);
+        const prev = fields.at(idx - 1) || fields.at(-1);
+        (prev as any).focus();
+        (form.parent as any).render();
       }
     });
   });
@@ -64,6 +74,7 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
     style: { fg: theme.fg, bg: theme.bgPanel, focus: { border: theme.focusBorder } },
     keys: true,
     mouse: true,
+    vi: true,
   } as any);
 
   const category = blessed.list({
@@ -163,7 +174,7 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
     width: "100%-2",
     height: 1,
     style: { fg: theme.fg, bg: theme.bgPanel },
-    content: " Tab: next | Ctrl+S: save | Esc: cancel ",
+    content: " j/k: next/prev | Ctrl+S: save | Esc: cancel | i: insert mode ",
   });
 
   const recommendationBox = blessed.box({
@@ -200,7 +211,7 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
     tips.push(`suggested: ${nextSource}`);
 
     (recommendationBox as any).setContent(`Tip: ${tips.join(" | ")}`);
-    (_hintBox as any).setContent(" Tab: next | Ctrl+S: save | Esc: cancel | see suggestions above ");
+    (_hintBox as any).setContent(" j/k: next/prev | Ctrl+S: save | Esc: cancel | i: insert | see suggestions above ");
   }
 
   const fields = [category, projectInput, topicsInput, nameInput, contentInput, saveBtn, cancelBtn] as any[];
@@ -397,7 +408,7 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     width: "100%-2",
     height: 1,
     style: { fg: theme.fg, bg: theme.bgPanel },
-    content: " Tab: next | Ctrl+S: save | Esc: cancel ",
+    content: " j/k: next/prev | Ctrl+S: save | Esc: cancel | i: insert mode ",
   });
 
   const recommended = suggestTags(opts.store, opts.entry, 5);
