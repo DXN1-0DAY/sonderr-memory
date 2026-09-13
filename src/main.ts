@@ -1,4 +1,4 @@
 #!/usr/bin/env bun
-import { launchTUI } from "./tui/index.ts";
+import { launchApp } from "./tui/app";
 
-launchTUI();
+launchApp();

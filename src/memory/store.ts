@@ -1,4 +1,4 @@
-import { MemoryEntry, MemoryStore, MemoryMeta } from "./types.ts";
+import { MemoryEntry, MemoryStore, MemoryMeta } from "./types";
 import * as path from "path";
 import * as fs from "fs";
 

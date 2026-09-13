@@ -2,17 +2,13 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
     "outDir": "dist",
     "baseUrl": ".",
-    "allowImportingTsExtensions": true,
-    "paths": {
-      "blessed": ["./node_modules/@types/blessed"]
-    },
     "lib": ["ES2022"]
   },
   "include": ["src"]
