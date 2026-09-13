@@ -34,13 +34,13 @@ export function launchApp(opts: AppOptions = {}) {
       width: "100%",
       height: 1,
       style: { fg: "#000000", bg: "#FF6A00", bold: true },
-      content: " sonderr-memory | Ctrl+N new | Ctrl+S search | Ctrl+L labels | Ctrl+X context | Ctrl+Q quit | ? help ",
+      content: " sonderr-memory | Ctrl+N new | Ctrl+S search | Ctrl+L labels | Ctrl+X context | Ctrl+Q quit | / command mode | ? help ",
     });
   }, () => null) as any;
 
   const sidebar = createSidebar({
     parent: screen,
-    width: "30%",
+    width: "25%",
     height: "60%",
     onSelect: (entry) => showEntry(entry),
   });
@@ -48,16 +48,16 @@ export function launchApp(opts: AppOptions = {}) {
   const editor = createEditor({
     parent: screen,
     top: 0,
-    left: "30%",
-    width: "40%",
+    left: "25%",
+    width: "50%",
     height: "60%",
   });
 
   const metadata = createMetadataPanel({
     parent: screen,
     top: 0,
-    left: "70%",
-    width: "30%",
+    left: "75%",
+    width: "25%",
     height: "60%",
   });
 
@@ -68,6 +68,21 @@ export function launchApp(opts: AppOptions = {}) {
     width: "100%",
     height: "20%",
   });
+
+  const inputBar = withErrorHandling(() => {
+    return require("blessed").textbox({
+      parent: screen,
+      label: " /command ",
+      top: "80%",
+      left: 0,
+      width: "100%",
+      height: 3,
+      border: { type: "line", fg: "#FF6A00" },
+      style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+      keys: true,
+      mouse: true,
+    });
+  }, () => null) as any;
 
   const statusBar = withErrorHandling(() => {
     return require("blessed").box({
@@ -202,12 +217,15 @@ export function launchApp(opts: AppOptions = {}) {
         "Enter      view entry",
         "/          command mode",
         "",
-        "PANELS",
+        "COMMANDS",
         "",
-        "Left       memory tree",
-        "Center     entry content",
-        "Right      metadata",
-        "Bottom     timeline",
+        "/tutorial              list tutorials",
+        "/tutorial <id>         run tutorial",
+        "/help                  show this help",
+        "/mcp                   start MCP server",
+        "/stats                 show stats",
+        "/timeline              show timeline",
+        "/clear                 clear editor",
         "",
         `ROOT: ${store.root}`,
       ].join("\n"));
@@ -217,43 +235,54 @@ export function launchApp(opts: AppOptions = {}) {
     });
   }
 
-  function handleCommandMode() {
-    const prompt = require("blessed").prompt({
-      parent: screen,
-      top: "center",
-      left: "center",
-      width: "50%",
-      height: "shrink",
-      border: { type: "line", fg: "#FF6A00" },
-      label: " command ",
-      style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
-      keys: true,
-      mouse: true,
-    } as any);
-
-    (prompt as any).input("command", (err: Error | null, value: string) => {
-      withErrorHandling(() => {
-        prompt.destroy();
-        if (!value) return;
-        const trimmed = value.trim();
-        if (trimmed === "/tutorial" || trimmed === "tutorial") {
-          showTutorialList();
-        } else if (trimmed.startsWith("/tutorial ")) {
-          const tutorialId = trimmed.split(" ")[1];
-          showTutorial(tutorialId);
-        } else if (trimmed === "/help" || trimmed === "help") {
-          handleHelp();
-        } else {
-          statusBar.setContent(` unknown command: ${trimmed} `);
-          screen.render();
-        }
-      }, () => {
-        prompt.destroy();
+  function handleCommand(input: string) {
+    const trimmed = input.trim();
+    if (trimmed === "/tutorial" || trimmed === "tutorial") {
+      showTutorialList();
+    } else if (trimmed.startsWith("/tutorial ")) {
+      showTutorial(trimmed.split(" ")[1]);
+    } else if (trimmed === "/help" || trimmed === "help") {
+      handleHelp();
+    } else if (trimmed === "/mcp" || trimmed === "mcp") {
+      statusBar.setContent(" starting MCP server... ");
+      screen.render();
+      import("../mcp-server").then(({ createMCPServer }) => {
+        const port = Number(process.env.SONDERR_MEMORY_MCP_PORT) || 3099;
+        createMCPServer(port);
+        statusBar.setContent(` MCP server running on :${port} `);
+        screen.render();
+      }).catch((err) => {
+        statusBar.setContent(` MCP error: ${err instanceof Error ? err.message : String(err)} `);
         screen.render();
       });
-    });
-
-    screen.render();
+    } else if (trimmed === "/stats" || trimmed === "stats") {
+      const all = loadEntries(store);
+      const stats = {
+        total: all.length,
+        sources: {} as Record<string, number>,
+        projects: {} as Record<string, number>,
+      };
+      for (const e of all) {
+        stats.sources[e.source] = (stats.sources[e.source] || 0) + 1;
+        if (e.project) stats.projects[e.project] = (stats.projects[e.project] || 0) + 1;
+      }
+      editor.box.setContent(JSON.stringify(stats, null, 2));
+      statusBar.setContent(" stats ");
+      screen.render();
+    } else if (trimmed === "/timeline" || trimmed === "timeline") {
+      const recent = getTimeline(store, 20);
+      const lines = recent.map((r) => `${r.createdAt} | ${r.source} | ${r.content.split("\n")[0].slice(0, 60)}`);
+      editor.box.setContent(lines.join("\n") || "(empty)");
+      statusBar.setContent(" timeline ");
+      screen.render();
+    } else if (trimmed === "/clear" || trimmed === "clear") {
+      editor.box.setContent("");
+      statusBar.setContent(" cleared ");
+      screen.render();
+    } else if (trimmed.startsWith("/")) {
+      statusBar.setContent(` unknown command: ${trimmed} `);
+      screen.render();
+    }
   }
 
   function showTutorialList() {
@@ -305,16 +334,15 @@ export function launchApp(opts: AppOptions = {}) {
     process.exit(0);
   }
 
-  const sidebarAny = sidebar as any;
-  const timelineAny = timeline as any;
-
-  sidebarAny.on("select", (_el: unknown, idx: number) => {
-    const visible = entries.slice(0, 200);
-    const item = visible[idx];
-    if (item) showEntry(item);
+  sidebar.on("select", (_el: unknown, idx: number) => {
+    const items = (sidebar as any).items || [];
+    const item = items[idx];
+    if (item && typeof item === "object" && "id" in item) {
+      showEntry(item as MemoryEntry);
+    }
   });
 
-  timelineAny.on("select", (_el: unknown, idx: number) => {
+  timeline.list.on("select", (_el: unknown, idx: number) => {
     const item = timelineEntries[idx];
     if (item) showEntry(item);
   });
@@ -325,14 +353,26 @@ export function launchApp(opts: AppOptions = {}) {
   screen.key(["c-x"], handleContextPreview);
   screen.key(["c-r"], handleRefresh);
   screen.key(["c-q", "C-c"], handleQuit);
-  screen.key(["/"], handleCommandMode);
+  screen.key(["/"], () => {
+    inputBar.focus();
+    inputBar.readInput((err: Error | null, value: string) => {
+      withErrorHandling(() => {
+        inputBar.clearValue();
+        if (!value) return;
+        handleCommand(value);
+      }, () => {
+        inputBar.clearValue();
+        screen.render();
+      });
+    });
+  });
   screen.key(["tab"], () => {
     withErrorHandling(() => {
       const focused = screen.focused;
       if (focused === editor.box) metadata.box.focus();
-      else if (focused === metadata.box) sidebarAny.focus();
-      else if (focused === sidebarAny) timelineAny.focus();
-      else editor.box.focus();
+      else if (focused === metadata.box) sidebar.focus();
+      else if (focused === sidebar) timeline.list.focus();
+      else inputBar.focus();
       screen.render();
     }, () => {});
   });

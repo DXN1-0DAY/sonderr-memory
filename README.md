@@ -39,9 +39,12 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 curl -fsSL https://raw.githubusercontent.com/DXN1-termux/sonderr-memory/main/install.sh | bash
 ```
 
-This installs the binary to `~/.local/bin/sonderr-memory` and adds it to your PATH if needed.
-
-> **Note:** The binary supports CLI and MCP commands. For TUI mode, clone the repo and run with `bun run src/main.ts`.
+This installs `sonderr-memory` as a global command. It will:
+- Install Bun if missing
+- Clone the repo to `~/.sonderr-memory`
+- Install dependencies
+- Create `~/.local/bin/sonderr-memory` wrapper
+- Add `~/.local/bin` to your PATH if needed
 
 ### Option 2: build from source
 
@@ -49,18 +52,16 @@ This installs the binary to `~/.local/bin/sonderr-memory` and adds it to your PA
 git clone https://github.com/DXN1-termux/sonderr-memory.git
 cd sonderr-memory
 bun install
-bun run build
+bun run dev
 ```
 
 ## Usage
 
 ```bash
-sonderr-memory            # launch TUI (requires Bun source mode)
+sonderr-memory            # launch TUI
 sonderr-memory --help     # help
 sonderr-memory mcp        # start MCP server
 ```
-
-> **Note:** The compiled binary supports all non-TUI commands. For TUI mode, run from source with `bun run src/main.ts` or `bun run dev`.
 
 ### TUI hotkeys
 
@@ -78,11 +79,15 @@ sonderr-memory mcp        # start MCP server
 
 ### Command mode
 
-Press `/` in the TUI to open command mode. Available commands:
+Press `/` in the TUI to open the command bar. Available commands:
 
 - `/tutorial` - list tutorials
-- `/tutorial <id>` - run a tutorial
+- `/tutorial <id>` - run tutorial
 - `/help` - show help
+- `/mcp` - start MCP server
+- `/stats` - show stats
+- `/timeline` - show timeline
+- `/clear` - clear editor
 
 ### CLI commands
 

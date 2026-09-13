@@ -9,26 +9,12 @@ const printJson = (data: unknown) => console.log(JSON.stringify(data, null, 2));
 
 const commands: Record<string, Command> = {
   tui: async () => {
-    try {
-      const { launchApp } = await import("./tui/app");
-      launchApp();
-    } catch (err) {
-      console.error("TUI mode requires running from source with Bun.");
-      console.error("Run: bun run src/main.ts");
-      console.error(`Detail: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
+    const { launchApp } = await import("./tui/app");
+    launchApp();
   },
   ui: async () => {
-    try {
-      const { launchApp } = await import("./tui/app");
-      launchApp();
-    } catch (err) {
-      console.error("TUI mode requires running from source with Bun.");
-      console.error("Run: bun run src/main.ts");
-      console.error(`Detail: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
+    const { launchApp } = await import("./tui/app");
+    launchApp();
   },
   remember: (args) => {
     const store = createStore();
@@ -180,6 +166,7 @@ const commands: Record<string, Command> = {
 sonderr-memory - local-first context engine
 
 commands:
+  (default)            launch TUI
   tui, ui              launch TUI
   remember, add <text> save a new memory
   search <query>       search memories
@@ -203,16 +190,11 @@ tutorials:
 env:
   SONDERR_MEMORY_ROOT  memory root (default: ~/.sonderr-memory)
   SONDERR_MEMORY_MCP_PORT  MCP server port (default: 3099)
-
-note:
-  TUI mode requires running from source with Bun.
-  Use 'bun run src/main.ts' or 'bun run dev' for TUI.
-  The compiled binary supports all non-TUI commands.
     `);
   },
 };
 
-const cmd = process.argv[2] || "help";
+const cmd = process.argv[2] || "tui";
 const cmdArgs = process.argv.slice(3);
 
 if (commands[cmd]) {
