@@ -9,12 +9,26 @@ const printJson = (data: unknown) => console.log(JSON.stringify(data, null, 2));
 
 const commands: Record<string, Command> = {
   tui: async () => {
-    const { launchApp } = await import("./tui/app");
-    launchApp();
+    try {
+      const { launchApp } = await import("./tui/app");
+      launchApp();
+    } catch (err) {
+      console.error("TUI mode requires running from source with Bun.");
+      console.error("Run: bun run src/main.ts");
+      console.error(`Detail: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   },
   ui: async () => {
-    const { launchApp } = await import("./tui/app");
-    launchApp();
+    try {
+      const { launchApp } = await import("./tui/app");
+      launchApp();
+    } catch (err) {
+      console.error("TUI mode requires running from source with Bun.");
+      console.error("Run: bun run src/main.ts");
+      console.error(`Detail: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   },
   remember: (args) => {
     const store = createStore();
