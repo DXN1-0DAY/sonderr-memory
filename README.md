@@ -1,6 +1,6 @@
 <div align="center">
 
-[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.09-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
+[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.10-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
 
 # sonderr-memory
 
