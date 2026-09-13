@@ -8,7 +8,12 @@
     "skipLibCheck": true,
     "noEmit": true,
     "outDir": "dist",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "blessed": ["./node_modules/@types/blessed"]
+    },
+    "lib": ["ES2022"]
   },
   "include": ["src"]
 }

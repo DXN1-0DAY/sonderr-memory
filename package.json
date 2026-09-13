@@ -1,19 +1,26 @@
 {
   "name": "sonderr-memory",
-  "version": "0.0.01",
+  "version": "0.0.02",
   "private": true,
   "type": "module",
   "description": "Local-first, file-backed context engine for AI coding agents.",
   "packageManager": "bun@1.3.14",
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "bun build ./src/main.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/main.ts --outdir ./dist --target bun --compile",
     "lint": "oxlint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun x tsc --noEmit"
+  },
+  "bin": {
+    "sonderr-memory": "./src/main.ts"
   },
   "workspaces": [],
-  "dependencies": {},
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "chalk": "^5.4.1"
+  },
   "devDependencies": {
+    "@types/blessed": "^0.1.25",
     "@types/bun": "1.3.14",
     "typescript": "5.8.2",
     "oxlint": "1.60.0"

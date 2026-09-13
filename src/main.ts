@@ -1,6 +1,4 @@
-import { createStore, inboxPath } from "./store.ts";
-import { search } from "./search.ts";
+#!/usr/bin/env bun
+import { launchTUI } from "./tui/index.ts";
 
-const store = createStore();
-console.log("sonderr-memory scaffold running");
-console.log("inbox root:", inboxPath(store));
+launchTUI();
