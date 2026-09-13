@@ -69,5 +69,5 @@ export function createTimeline(opts: TimelineOptions) {
     }, () => {});
   }
 
-  return { list, render };
+  return list as any;
 }
