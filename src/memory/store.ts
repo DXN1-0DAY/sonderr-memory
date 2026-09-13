@@ -3,7 +3,6 @@ import * as path from "path";
 import * as fs from "fs";
 import { logger } from "../logger";
 import { ensureStore, ensureDirs } from "../utils/store-helpers";
-import { groupBy, deduplicate } from "../utils/array";
 
 const ROOT = (process.env.SONDERR_MEMORY_ROOT || (process.env.HOME ? `${process.env.HOME}/.sonderr-memory` : "/tmp/.sonderr-memory"));
 ensureStore(ROOT);
@@ -42,6 +41,88 @@ export function referencePath(store: MemoryStore): string {
 
 export function indexPath(store: MemoryStore): string {
   return path.join(store.root, "index");
+}
+
+
+export interface SessionState {
+  lastEntryId?: string;
+  lastQuery?: string;
+  savedAt: string;
+}
+
+const SESSION_FILE = "session.json";
+
+function sessionPath(store: MemoryStore): string {
+  return path.join(store.root, SESSION_FILE);
+}
+
+export function saveSessionState(store: MemoryStore, state: Partial<SessionState>): void {
+  try {
+    const existing: SessionState = loadSessionState(store) ?? { savedAt: new Date().toISOString() };
+    const merged: SessionState = { ...existing, ...state, savedAt: new Date().toISOString() };
+    fs.writeFileSync(sessionPath(store), JSON.stringify(merged, null, 2));
+  } catch (err) {
+    logger.warn("store", "Failed to save session state: " + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+export function loadSessionState(store: MemoryStore): SessionState | null {
+  try {
+    const p = sessionPath(store);
+    if (!fs.existsSync(p)) return null;
+    const text = fs.readFileSync(p, "utf-8");
+    return JSON.parse(text) as SessionState;
+  } catch {
+    return null;
+  }
+}
+
+function yamlEscape(value: string): string {
+  if (value === "") return '""';
+  if (/[#:{}[\]&,\n\r]/.test(value) || /^\s|\s$/.test(value) || /^(true|false|null|yes|no|on|off|\d+\.?\d*)$/i.test(value)) {
+    return JSON.stringify(value);
+  }
+  if (value.includes('"') || value.includes("'")) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+function stableIdFromPath(fullPath: string): string {
+  const name = path.basename(fullPath, ".md");
+  let hash = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `entry-${Math.abs(hash) >>> 0}`;
+}
+
+function parseFrontmatter(text: string): { frontmatter: Record<string, string>; content: string } {
+  const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!fmMatch) {
+    return { frontmatter: {}, content: text.trim() };
+  }
+  const frontmatter: Record<string, string> = {};
+  for (const line of fmMatch[1].split(/\r?\n/)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    let rawValue = m[2].trim();
+    if (rawValue.startsWith('"') && rawValue.endsWith('"')) {
+      rawValue = rawValue.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"');
+    } else if (rawValue.startsWith("'") && rawValue.endsWith("'")) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    frontmatter[key] = rawValue;
+  }
+  const content = fmMatch[2]?.trim() ?? "";
+  return { frontmatter, content };
+}
+
+function splitCsv(value: string | undefined): string[] {
+  if (!value) return [];
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 export function saveEntry(
@@ -95,25 +176,23 @@ export function saveEntry(
   const filename = `${ts}-${slug}.md`;
   const fullPath = path.join(dir, filename);
 
-  const frontmatter = [
-    "---",
+  const frontmatterLines = [
     `id: ${entry.id}`,
     `createdAt: ${entry.createdAt}`,
     `updatedAt: ${entry.updatedAt}`,
     `source: ${category}`,
-    extra.project ? `project: ${extra.project}` : "",
-    extra.topics?.length ? `topics: ${extra.topics.join(", ")}` : "",
-    extra.people?.length ? `people: ${extra.people.join(", ")}` : "",
-    extra.tags?.length ? `tags: ${entry.tags.join(", ")}` : "",
-    extra.linkedIds?.length ? `linkedIds: ${entry.linkedIds.join(", ")}` : "",
+    extra.project ? `project: ${yamlEscape(extra.project)}` : "",
+    extra.topics?.length ? `topics: ${yamlEscape(extra.topics.join(", "))}` : "",
+    extra.people?.length ? `people: ${yamlEscape(extra.people.join(", "))}` : "",
+    extra.tags?.length ? `tags: ${yamlEscape(extra.tags.join(", "))}` : "",
+    extra.linkedIds?.length ? `linkedIds: ${yamlEscape(extra.linkedIds.join(", "))}` : "",
     `importance: ${entry.importance}`,
     `confidence: ${entry.confidence}`,
     `accessCount: ${entry.accessCount}`,
     `lastAccessedAt: ${entry.lastAccessedAt}`,
-    "---",
-    "",
-    content,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean);
+
+  const frontmatter = ["---", ...frontmatterLines, "---", "", content].join("\n");
 
   fs.writeFileSync(fullPath, frontmatter);
   entry.path = fullPath;
@@ -122,6 +201,7 @@ export function saveEntry(
 }
 
 export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[] {
+  const seenPaths = new Set<string>();
   const entries: MemoryEntry[] = [];
   const walk = (dir: string) => {
     if (!fs.existsSync(dir)) return;
@@ -129,6 +209,8 @@ export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[
     for (const entry of entries_list) {
       if (entry.isFile() && entry.name.endsWith(".md")) {
         const full = path.join(entry.path ?? dir, entry.name);
+        if (seenPaths.has(full)) continue;
+        seenPaths.add(full);
         try {
           const text = fs.readFileSync(full, "utf-8");
           entries.push(parseEntry(full, text));
@@ -152,19 +234,63 @@ export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[
   } else {
     walk(store.root);
   }
-  return deduplicate(entries, (e) => e.id);
+
+  const byId = new Map<string, MemoryEntry>();
+  for (const entry of entries) {
+    const existing = byId.get(entry.id);
+    if (!existing || new Date(entry.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+      byId.set(entry.id, entry);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 export function searchEntries(store: MemoryStore, query: string): MemoryEntry[] {
-  const q = query.toLowerCase();
-  const words = q.split(/\W+/).filter((w) => w.length > 2);
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+
+  const fieldWeights = {
+    project: 8,
+    topic: 4,
+    tag: 3,
+    people: 3,
+    content: 1,
+  };
+  const exactPhraseBonus = 20;
+  const wordLengthBonus = 0.5;
+  const lengthNormalization = true;
+
+  const queryWords = q.split(/\W+/).filter((w) => w.length > 0);
+  if (queryWords.length === 0) return [];
+
   return loadEntries(store).map((entry) => {
-    const hay = `${entry.content} ${entry.topics.join(" ")} ${entry.tags.join(" ")} ${entry.people.join(" ")} ${entry.project ?? ""}`.toLowerCase();
+    const contentLower = entry.content.toLowerCase();
+    const haystack = `${entry.project ?? ""} ${entry.topics.join(" ")} ${entry.tags.join(" ")} ${entry.people.join(" ")} ${contentLower}`;
     let score = 0;
-    if (hay.includes(q)) score += 10;
-    for (const w of words) {
-      if (hay.includes(w)) score += 2;
+
+    if (haystack.includes(q)) {
+      score += exactPhraseBonus;
     }
+
+    for (const word of queryWords) {
+      if (word.length <= 2) continue;
+      let wordScore = 0;
+      if (entry.project?.toLowerCase() === word) wordScore += fieldWeights.project;
+      for (const t of entry.topics) if (t.toLowerCase() === word) wordScore += fieldWeights.topic;
+      for (const t of entry.tags) if (t.toLowerCase() === word) wordScore += fieldWeights.tag;
+      for (const p of entry.people) if (p.toLowerCase() === word) wordScore += fieldWeights.people;
+      if (contentLower.includes(word)) wordScore += fieldWeights.content;
+      wordScore += word.length * wordLengthBonus;
+      score += wordScore;
+    }
+
+    if (lengthNormalization) {
+      score /= Math.log2(entry.content.length + 1);
+    }
+
+    const matchedCount = queryWords.filter((w) => haystack.includes(w)).length;
+    score *= matchedCount / queryWords.length;
+
     return { entry, score };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).map((x) => x.entry);
 }
@@ -225,6 +351,8 @@ export function getRelated(store: MemoryStore, entry: MemoryEntry, limit = 10): 
   return all.sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 
+const MAX_CONTENT_SNIPPET = 600;
+
 export function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
@@ -277,44 +405,75 @@ export function buildContextPlan(store: MemoryStore, query: string, budget: Cont
   return { query, items: selected, totalTokens: total, budget };
 }
 
+function formatSnippet(entry: MemoryEntry, score: number, reason: string, tokens: number): string {
+  const project = entry.project || "(no project)";
+  const topics = entry.topics.length ? entry.topics.join(", ") : "(no topics)";
+  const content = entry.content.length > MAX_CONTENT_SNIPPET
+    ? entry.content.slice(0, MAX_CONTENT_SNIPPET) + "…"
+    : entry.content;
+
+  return [
+    `  [${entry.source}] ${project}`,
+    `  topics: ${topics}`,
+    `  score: ${score.toFixed(1)} | reason: ${reason || "relevance"} | tokens: ${tokens}`,
+    ``,
+    content,
+  ].join("\n");
+}
+
 export function exportForContext(store: MemoryStore, query: string, maxTokens = 2000): string {
-  const plan = buildContextPlan(store, query, {
+  const budget: ContextBudget = {
     maxTokens,
     reservedForSystem: 200,
     reservedForResponse: 400,
     availableForMemory: Math.max(100, maxTokens - 600),
-  });
+  };
 
+  const plan = buildContextPlan(store, query, budget);
   const parts: string[] = [];
-  for (const item of plan.items) {
-    const snippet = `[${item.entry.source}] ${item.entry.project ?? ""} ${item.entry.topics.join(" ")} (score: ${item.score.toFixed(1)}, reason: ${item.reason})\n${item.entry.content}\n`;
-    parts.push(snippet);
-    touchEntry(store, item.entry);
+
+  parts.push(`CONTEXT PREVIEW`);
+  parts.push(`query: "${query}"`);
+  parts.push(`budget: max=${budget.maxTokens} | system=${budget.reservedForSystem} | response=${budget.reservedForResponse} | available=${budget.availableForMemory}`);
+  parts.push(`selected: ${plan.items.length} of budget`);
+
+  if (plan.items.length === 0) {
+    parts.push("");
+    parts.push(`(no matching entries found within token budget)`);
+  } else {
+    plan.items.forEach((item, i) => {
+      if (i > 0) parts.push("");
+      parts.push(`ENTRY ${i + 1}/${plan.items.length} (id: ${item.entry.id.slice(0, 8)}…)`);
+      parts.push(formatSnippet(item.entry, item.score, item.reason, item.tokens));
+      touchEntry(store, item.entry);
+    });
   }
-  return parts.join("\n---\n");
+
+  parts.push("");
+  parts.push(`SUMMARY: used=${plan.totalTokens} tokens across ${plan.items.length} entries`);
+
+  return parts.join("\n");
 }
 
 export function updateEntry(store: MemoryStore, entry: MemoryEntry, patch: Partial<MemoryEntry>): MemoryEntry {
   const updated = { ...entry, ...patch, updatedAt: new Date().toISOString() };
-  const frontmatter = [
-    "---",
+  const frontmatterLines = [
     `id: ${updated.id}`,
     `createdAt: ${updated.createdAt}`,
     `updatedAt: ${updated.updatedAt}`,
     `source: ${updated.source}`,
-    updated.project ? `project: ${updated.project}` : "",
-    updated.topics?.length ? `topics: ${updated.topics.join(", ")}` : "",
-    updated.people?.length ? `people: ${updated.people.join(", ")}` : "",
-    updated.tags?.length ? `tags: ${updated.tags.join(", ")}` : "",
-    updated.linkedIds?.length ? `linkedIds: ${updated.linkedIds.join(", ")}` : "",
+    updated.project ? `project: ${yamlEscape(updated.project)}` : "",
+    updated.topics?.length ? `topics: ${yamlEscape(updated.topics.join(", "))}` : "",
+    updated.people?.length ? `people: ${yamlEscape(updated.people.join(", "))}` : "",
+    updated.tags?.length ? `tags: ${yamlEscape(updated.tags.join(", "))}` : "",
+    updated.linkedIds?.length ? `linkedIds: ${yamlEscape(updated.linkedIds.join(", "))}` : "",
     `importance: ${updated.importance}`,
     `confidence: ${updated.confidence}`,
     `accessCount: ${updated.accessCount}`,
     `lastAccessedAt: ${updated.lastAccessedAt}`,
-    "---",
-    "",
-    updated.content,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean);
+
+  const frontmatter = ["---", ...frontmatterLines, "---", "", updated.content].join("\n");
   fs.writeFileSync(updated.path, frontmatter);
   logger.debug(`Updated entry: ${updated.id}`);
   return updated;
@@ -331,7 +490,7 @@ export function linkEntries(store: MemoryStore, source: MemoryEntry, target: Mem
   const updatedSource = updateEntry(store, source, {
     linkedIds: [...source.linkedIds, target.id],
   });
-  const updatedTarget = updateEntry(store, target, {
+  updateEntry(store, target, {
     linkedIds: [...target.linkedIds, source.id],
   });
   logger.debug(`Linked entries: ${source.id} <-> ${target.id}`);
@@ -362,32 +521,31 @@ export function suggestTags(store: MemoryStore, entry: MemoryEntry, limit = 5): 
     .map(([tag]) => tag);
 }
 
-function parseEntry(fullPath: string, text: string): MemoryEntry {
-  const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  const frontmatter = fmMatch?.[1] ?? "";
-  const content = fmMatch?.[2]?.trim() ?? text;
+export function parseEntry(fullPath: string, text: string): MemoryEntry {
+  const { frontmatter, content } = parseFrontmatter(text);
+  const now = new Date().toISOString();
+  const id = frontmatter.id && frontmatter.id.length > 0 ? frontmatter.id : stableIdFromPath(fullPath);
 
-  const meta: Record<string, string> = {};
-  for (const line of frontmatter.split("\n")) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m) meta[m[1]] = m[2].trim();
-  }
+  const toNumber = (value: string | undefined, fallback: number): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
   return {
-    id: meta.id || crypto.randomUUID(),
-    createdAt: meta.createdAt || new Date().toISOString(),
-    updatedAt: meta.updatedAt || new Date().toISOString(),
+    id,
+    createdAt: frontmatter.createdAt && frontmatter.createdAt.length > 0 ? frontmatter.createdAt : now,
+    updatedAt: frontmatter.updatedAt && frontmatter.updatedAt.length > 0 ? frontmatter.updatedAt : now,
     path: fullPath,
-    project: meta.project,
-    topics: meta.topics ? meta.topics.split(",").map((s) => s.trim()) : [],
-    people: meta.people ? meta.people.split(",").map((s) => s.trim()) : [],
-    tags: meta.tags ? meta.tags.split(",").map((s) => s.trim()) : [],
-    source: (meta.source as MemoryEntry["source"]) || "inbox",
-    linkedIds: meta.linkedIds ? meta.linkedIds.split(",").map((s) => s.trim()) : [],
-    content,
-    importance: Number(meta.importance) || 0.5,
-    confidence: Number(meta.confidence) || 0.8,
-    accessCount: Number(meta.accessCount) || 0,
-    lastAccessedAt: meta.lastAccessedAt || new Date().toISOString(),
+    project: frontmatter.project,
+    topics: splitCsv(frontmatter.topics),
+    people: splitCsv(frontmatter.people),
+    tags: splitCsv(frontmatter.tags),
+    source: (frontmatter.source as MemoryEntry["source"]) ?? "inbox",
+    linkedIds: splitCsv(frontmatter.linkedIds),
+    content: content.length > 0 ? content : text.trim(),
+    importance: toNumber(frontmatter.importance, 0.5),
+    confidence: toNumber(frontmatter.confidence, 0.8),
+    accessCount: toNumber(frontmatter.accessCount, 0),
+    lastAccessedAt: frontmatter.lastAccessedAt && frontmatter.lastAccessedAt.length > 0 ? frontmatter.lastAccessedAt : now,
   };
 }

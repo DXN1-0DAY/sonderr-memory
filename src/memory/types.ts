@@ -16,6 +16,22 @@ export type MemoryEntry = {
   lastAccessedAt: string;
 };
 
+export type MemoryFrontmatter = {
+  id?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  source?: MemoryEntry["source"];
+  project?: string;
+  topics?: string[];
+  people?: string[];
+  tags?: string[];
+  linkedIds?: string[];
+  importance?: number;
+  confidence?: number;
+  accessCount?: number;
+  lastAccessedAt?: string;
+};
+
 export type MemoryStore = {
   root: string;
 };
@@ -48,4 +64,17 @@ export type ContextPlan = {
   items: ContextItem[];
   totalTokens: number;
   budget: ContextBudget;
+};
+
+export type SearchOptions = {
+  fieldWeights?: {
+    project?: number;
+    topic?: number;
+    tag?: number;
+    people?: number;
+    content?: number;
+  };
+  exactPhraseBonus?: number;
+  wordLengthBonus?: number;
+  lengthNormalization?: boolean;
 };

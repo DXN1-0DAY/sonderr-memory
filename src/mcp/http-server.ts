@@ -1,5 +1,6 @@
 import { createServer } from "http";
 import { callTool, getTools } from "./server";
+import { logger } from "../logger";
 
 export type MCPRequest = {
   jsonrpc: "2.0";
@@ -54,7 +55,7 @@ export function createMCPServer(port = 3099) {
   });
 
   server.listen(port, () => {
-    console.log(`sonderr-memory MCP server listening on http://localhost:${port}/mcp`);
+    logger.info("mcp", `sonderr-memory MCP server listening on http://localhost:${port}/mcp`);
   });
 
   return server;

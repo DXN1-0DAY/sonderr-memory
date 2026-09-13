@@ -1,6 +1,6 @@
 {
   "name": "sonderr-memory",
-  "version": "0.0.02",
+  "version": "0.0.12",
   "private": true,
   "type": "module",
   "description": "Local-first, file-backed context engine for AI coding agents.",
