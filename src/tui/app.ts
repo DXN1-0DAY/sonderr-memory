@@ -1,10 +1,5 @@
 import { MemoryEntry, MemoryStore } from "../memory/types";
-import { createStore, loadEntries, searchEntries, getTimeline, getRelated, exportForContext } from "../memory/store";
-import { createSidebar, renderSidebarItems } from "./panels/sidebar";
-import { createEditor } from "./panels/editor";
-import { createMetadataPanel } from "./panels/metadata";
-import { createTimeline } from "./panels/timeline";
-import { showCreateMemoryForm, showEditLabelsForm, showSearchPrompt } from "./forms";
+import { createStore, loadEntries, searchEntries, getTimeline, getRelated, exportForContext, saveEntry } from "../memory/store";
 import { withErrorHandling } from "../errors/tui-errors";
 import { getAllTutorials, getTutorial } from "../tutorial";
 
@@ -26,57 +21,36 @@ export function launchApp(opts: AppOptions = {}) {
     process.exit(1);
   }) as any;
 
-  const topBar = withErrorHandling(() => {
+  const main = withErrorHandling(() => {
     return require("blessed").box({
       parent: screen,
+      label: " sonderr-memory ",
       top: 0,
       left: 0,
       width: "100%",
-      height: 1,
-      style: { fg: "#000000", bg: "#FF6A00", bold: true },
-      content: " sonderr-memory | Ctrl+N new | Ctrl+S search | Ctrl+L labels | Ctrl+X context | Ctrl+Q quit | / command mode | ? help ",
+      height: "88%",
+      border: { type: "line", fg: "#FF6A00" },
+      style: {
+        fg: "#e6e6e6",
+        bg: "#0d0d0d",
+        focus: { border: { fg: "#FF6A00" } },
+      },
+      scrollable: true,
+      alwaysScroll: true,
+      mouse: true,
+      keys: true,
+      vi: true,
     });
   }, () => null) as any;
-
-  const sidebar = createSidebar({
-    parent: screen,
-    width: "25%",
-    height: "60%",
-    onSelect: (entry) => showEntry(entry),
-  });
-
-  const editor = createEditor({
-    parent: screen,
-    top: 0,
-    left: "25%",
-    width: "50%",
-    height: "60%",
-  });
-
-  const metadata = createMetadataPanel({
-    parent: screen,
-    top: 0,
-    left: "75%",
-    width: "25%",
-    height: "60%",
-  });
-
-  const timeline = createTimeline({
-    parent: screen,
-    top: "60%",
-    left: 0,
-    width: "100%",
-    height: "20%",
-  });
 
   const inputBar = withErrorHandling(() => {
     return require("blessed").textbox({
       parent: screen,
-      label: " /command ",
-      top: "80%",
+      label: " command ",
+      top: "88%",
       left: 0,
       width: "100%",
-      height: 3,
+      height: "12%",
       border: { type: "line", fg: "#FF6A00" },
       style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
       keys: true,
@@ -98,151 +72,346 @@ export function launchApp(opts: AppOptions = {}) {
 
   let entries: MemoryEntry[] = [];
   let selectedEntry: MemoryEntry | null = null;
-  let timelineEntries: MemoryEntry[] = [];
+
+  function renderWelcome() {
+    withErrorHandling(() => {
+      main.setContent([
+        "╭──────────────────────────────────────────────────────────╮",
+        "│                                                          │",
+        "│   ███████╗██╗   ██╗███╗   ██╗██╗  ██╗                  │",
+        "│   ██╔════╝██║   ██║████╗  ██║██║  ██║                  │",
+        "│   ███████╗██║   ██║██╔██╗ ██║███████║                  │",
+        "│   ╚════██║██║   ██║██║╚██╗██║██╔══██║                  │",
+        "│   ███████║╚██████╔╝██║ ╚████║██║  ██║                  │",
+        "│   ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝                  │",
+        "│                                                          │",
+        "│   context engine for AI coding agents                    │",
+        "│                                                          │",
+        "╰──────────────────────────────────────────────────────────╯",
+        "",
+        "Type / for commands",
+        "",
+        "  /tutorial      list tutorials",
+        "  /mcp           start MCP server",
+        "  /stats         show statistics",
+        "  /timeline      recent memories",
+        "  /help          show all commands",
+        "",
+        "Shortcuts:",
+        "  Ctrl+N         new memory",
+        "  Ctrl+S         search",
+        "  Ctrl+R         refresh",
+        "  Ctrl+Q         quit",
+        "  Tab            switch focus",
+        "  ?              help",
+      ].join("\n"));
+      screen.render();
+    }, () => {});
+  }
 
   function showEntry(entry: MemoryEntry) {
     selectedEntry = entry;
-    editor.render(entry);
-    metadata.render(store, entry);
-    statusBar.setContent(` loaded: ${entry.path} `);
-    screen.render();
+    withErrorHandling(() => {
+      const text = [
+        entry.content,
+        "",
+        "--- metadata ---",
+        "",
+        `id:        ${entry.id}`,
+        `createdAt: ${entry.createdAt}`,
+        `updatedAt: ${entry.updatedAt}`,
+        `source:    ${entry.source}`,
+        `project:   ${entry.project || "(none)"}`,
+        `topics:    ${entry.topics.join(", ") || "(none)"}`,
+        `people:    ${entry.people.join(", ") || "(none)"}`,
+        `tags:      ${entry.tags.join(", ") || "(none)"}`,
+        `linkedIds: ${entry.linkedIds.join(", ") || "(none)"}`,
+        `path:      ${entry.path}`,
+      ].join("\n");
+      main.setContent(text);
+      statusBar.setContent(` loaded: ${entry.path} `);
+      screen.render();
+    }, () => {
+      statusBar.setContent(" error loading entry ");
+    });
   }
 
-  function refreshSidebar(filter?: string) {
+  function refreshEntries() {
     withErrorHandling(() => {
-      entries = filter ? searchEntries(store, filter) : loadEntries(store);
-      renderSidebarItems(sidebar, entries, (entry) =>
-        entry.source === "inbox"
-          ? `inbox/${entry.path.split("/").slice(-3, -1).join("/")}`
-          : entry.source === "project"
-            ? `projects/${entry.project || "unknown"}`
-            : entry.source === "topic"
-              ? `topics/${entry.topics[0] || "general"}`
-              : entry.source === "lesson"
-                ? "lessons"
-                : "references"
-      );
+      entries = loadEntries(store);
     }, () => {
       statusBar.setContent(" error loading entries ");
     });
   }
 
-  function refreshTimeline() {
-    withErrorHandling(() => {
-      timelineEntries = getTimeline(store, 40);
-      timeline.render(timelineEntries);
-    }, () => {
-      statusBar.setContent(" error loading timeline ");
-    });
-  }
-
   function handleNewMemory() {
-    showCreateMemoryForm({
-      screen,
-      store,
-      onSaved: () => {
-        refreshSidebar();
-        refreshTimeline();
+    const form = withErrorHandling(() => {
+      return require("blessed").form({
+        parent: screen,
+        top: "center",
+        left: "center",
+        width: "70%",
+        height: "60%",
+        label: " new memory ",
+        border: { type: "line", fg: "#FF6A00" },
+        style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+        keys: true,
+        mouse: true,
+      });
+    }, () => null) as any;
+
+    if (!form) return;
+
+    const category = require("blessed").list({
+      parent: form,
+      label: " category ",
+      top: 1,
+      left: 1,
+      width: "40%",
+      height: 6,
+      style: { selected: { bg: "#FF6A00", fg: "#000000" } },
+      items: ["inbox", "project", "topic", "lesson", "reference"],
+    } as any);
+    (category as any).select(0);
+
+    const projectInput = require("blessed").textbox({
+      parent: form,
+      label: " project ",
+      top: 8,
+      left: 1,
+      width: "40%",
+      height: 3,
+      border: { type: "line" },
+      style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+      keys: true,
+      mouse: true,
+    } as any);
+
+    const topicsInput = require("blessed").textbox({
+      parent: form,
+      label: " topics ",
+      top: 8,
+      left: "50%",
+      width: "50%",
+      height: 3,
+      border: { type: "line" },
+      style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+      keys: true,
+      mouse: true,
+    } as any);
+
+    const nameInput = require("blessed").textbox({
+      parent: form,
+      label: " title ",
+      top: 12,
+      left: 1,
+      width: "90%",
+      height: 3,
+      border: { type: "line" },
+      style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+      keys: true,
+      mouse: true,
+    } as any);
+
+    const contentInput = require("blessed").textarea({
+      parent: form,
+      label: " content ",
+      top: 16,
+      left: 1,
+      width: "90%",
+      height: "60%",
+      border: { type: "line" },
+      style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+      keys: true,
+      mouse: true,
+    } as any);
+
+    const saveBtn = require("blessed").button({
+      parent: form,
+      label: " save ",
+      top: "88%",
+      left: "center",
+      width: 12,
+      height: 3,
+      style: { bg: "#FF6A00", fg: "#000000", bold: true, focus: { bg: "#ff8533" } },
+    } as any);
+
+    const cancelBtn = require("blessed").button({
+      parent: form,
+      label: " cancel ",
+      top: "88%",
+      left: "center+14",
+      width: 12,
+      height: 3,
+      style: { bg: "#333333", fg: "#e6e6e6", focus: { bg: "#444444" } },
+    } as any);
+
+    saveBtn.on("press", () => {
+      withErrorHandling(() => {
+        const selectedIdx = (category as any).selected ?? 0;
+        const cat = ((category as any).items ?? [])[selectedIdx];
+        const topics = ((topicsInput as any).value || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        saveEntry(store, cat, (nameInput as any).value || "untitled", (contentInput as any).value || "", {
+          project: (projectInput as any).value || undefined,
+          topics,
+        });
+        form.destroy();
+        refreshEntries();
         statusBar.setContent(" saved ");
         screen.render();
-      },
+      }, () => {
+        statusBar.setContent(" error saving ");
+      });
     });
-  }
 
-  function handleEditLabels() {
-    const current = selectedEntry;
-    if (!current) {
-      statusBar.setContent(" no entry selected ");
+    cancelBtn.on("press", () => {
+      form.destroy();
       screen.render();
-      return;
-    }
-    showEditLabelsForm({
-      screen,
-      store,
-      entry: current,
-      onUpdated: (updated) => {
-        selectedEntry = updated;
-        refreshSidebar();
-        refreshTimeline();
-        editor.render(updated);
-        metadata.render(store, updated);
-        statusBar.setContent(" labels updated ");
-        screen.render();
-      },
     });
+
+    screen.append(form);
+    (nameInput as any).focus();
+    screen.render();
   }
 
   function handleSearch() {
-    showSearchPrompt({
-      screen,
-      onSubmit: (query) => {
-        refreshSidebar(query);
-        statusBar.setContent(` search: ${query} `);
+    const prompt = withErrorHandling(() => {
+      return require("blessed").prompt({
+        parent: screen,
+        top: "center",
+        left: "center",
+        width: "50%",
+        height: "shrink",
+        border: { type: "line", fg: "#FF6A00" },
+        label: " search ",
+        style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+        keys: true,
+        mouse: true,
+      });
+    }, () => null) as any;
+
+    if (!prompt) return;
+
+    (prompt as any).input("query", (err: Error | null, value: string) => {
+      withErrorHandling(() => {
+        prompt.destroy();
+        if (value) {
+          const results = searchEntries(store, value);
+          if (results.length > 0) {
+            showEntry(results[0]);
+            statusBar.setContent(` search: ${value} (${results.length} results) `);
+          } else {
+            statusBar.setContent(` no results for: ${value} `);
+          }
+          screen.render();
+        }
+      }, () => {
+        prompt.destroy();
         screen.render();
-      },
+      });
     });
+
+    screen.render();
   }
 
-  function handleContextPreview() {
-    const current = selectedEntry;
-    if (!current) {
-      statusBar.setContent(" no entry selected ");
+  function showCommandPalette() {
+    const commands = [
+      { cmd: "/tutorial", desc: "list tutorials" },
+      { cmd: "/tutorial <id>", desc: "run tutorial" },
+      { cmd: "/help", desc: "show help" },
+      { cmd: "/mcp", desc: "start MCP server" },
+      { cmd: "/stats", desc: "show statistics" },
+      { cmd: "/timeline", desc: "show recent memories" },
+      { cmd: "/clear", desc: "clear screen" },
+      { cmd: "/search <query>", desc: "search memories" },
+      { cmd: "/new", desc: "create new memory" },
+      { cmd: "/quit", desc: "quit" },
+    ];
+
+    const list = withErrorHandling(() => {
+      return require("blessed").list({
+        parent: screen,
+        label: " commands ",
+        top: "10%",
+        left: "center",
+        width: "50%",
+        height: "60%",
+        border: { type: "line", fg: "#FF6A00" },
+        style: {
+          fg: "#e6e6e6",
+          bg: "#1a1a1a",
+          selected: { bg: "#FF6A00", fg: "#000000" },
+          focus: { border: { fg: "#FF6A00" } },
+        },
+        items: commands.map((c) => `${c.cmd.padEnd(20)} ${c.desc}`),
+        keys: true,
+        vi: true,
+        mouse: true,
+      });
+    }, () => null) as any;
+
+    if (!list) return;
+
+    const input = withErrorHandling(() => {
+      return require("blessed").textbox({
+        parent: screen,
+        label: " filter ",
+        top: "5%",
+        left: "center",
+        width: "50%",
+        height: 3,
+        border: { type: "line", fg: "#FF6A00" },
+        style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+        keys: true,
+        mouse: true,
+      });
+    }, () => null) as any;
+
+    if (!input) return;
+
+    function updateSuggestions(query: string) {
+      const filtered = commands.filter((c) => c.cmd.includes(query) || c.desc.includes(query));
+      (list as any).setItems(filtered.map((c) => `${c.cmd.padEnd(20)} ${c.desc}`));
+      (list as any).select(0);
       screen.render();
-      return;
     }
-    withErrorHandling(() => {
-      const query = current.content.split("\n")[0];
-      const ctx = exportForContext(store, query, 1500);
-      editor.box.setContent(`--- context preview ---\n\n${ctx}`);
-      statusBar.setContent(" context preview ");
-      screen.render();
-    }, () => {
-      statusBar.setContent(" error generating context ");
-    });
-  }
 
-  function handleHelp() {
-    withErrorHandling(() => {
-      editor.box.setContent([
-        "KEYBINDS",
-        "",
-        "Ctrl+N     new memory",
-        "Ctrl+S     search",
-        "Ctrl+L     edit labels",
-        "Ctrl+X     context preview",
-        "Ctrl+R     refresh",
-        "Ctrl+Q     quit",
-        "Up/Down    navigate sidebar / timeline",
-        "Tab        switch panels",
-        "Enter      view entry",
-        "/          command mode",
-        "",
-        "COMMANDS",
-        "",
-        "/tutorial              list tutorials",
-        "/tutorial <id>         run tutorial",
-        "/help                  show this help",
-        "/mcp                   start MCP server",
-        "/stats                 show stats",
-        "/timeline              show timeline",
-        "/clear                 clear editor",
-        "",
-        `ROOT: ${store.root}`,
-      ].join("\n"));
-      screen.render();
-    }, () => {
-      statusBar.setContent(" error showing help ");
+    (input as any).on("keypress", (_ch: unknown, key: any) => {
+      if (key.name === "escape") {
+        input.destroy();
+        list.destroy();
+        screen.render();
+      }
     });
+
+    (input as any).on("submit", () => {
+      const value = (input as any).value || "";
+      input.destroy();
+      list.destroy();
+      handleCommand(value);
+      screen.render();
+    });
+
+    (input as any).on("change", () => {
+      updateSuggestions((input as any).value || "");
+    });
+
+    screen.append(input);
+    screen.append(list);
+    (input as any).focus();
+    screen.render();
   }
 
   function handleCommand(input: string) {
     const trimmed = input.trim();
+    if (!trimmed) return;
+
     if (trimmed === "/tutorial" || trimmed === "tutorial") {
       showTutorialList();
     } else if (trimmed.startsWith("/tutorial ")) {
       showTutorial(trimmed.split(" ")[1]);
     } else if (trimmed === "/help" || trimmed === "help") {
-      handleHelp();
+      showHelp();
     } else if (trimmed === "/mcp" || trimmed === "mcp") {
       statusBar.setContent(" starting MCP server... ");
       screen.render();
@@ -266,19 +435,35 @@ export function launchApp(opts: AppOptions = {}) {
         stats.sources[e.source] = (stats.sources[e.source] || 0) + 1;
         if (e.project) stats.projects[e.project] = (stats.projects[e.project] || 0) + 1;
       }
-      editor.box.setContent(JSON.stringify(stats, null, 2));
+      main.setContent(JSON.stringify(stats, null, 2));
       statusBar.setContent(" stats ");
       screen.render();
     } else if (trimmed === "/timeline" || trimmed === "timeline") {
       const recent = getTimeline(store, 20);
       const lines = recent.map((r) => `${r.createdAt} | ${r.source} | ${r.content.split("\n")[0].slice(0, 60)}`);
-      editor.box.setContent(lines.join("\n") || "(empty)");
+      main.setContent(lines.join("\n") || "(empty)");
       statusBar.setContent(" timeline ");
       screen.render();
     } else if (trimmed === "/clear" || trimmed === "clear") {
-      editor.box.setContent("");
+      main.setContent("");
       statusBar.setContent(" cleared ");
       screen.render();
+    } else if (trimmed === "/new" || trimmed === "new") {
+      handleNewMemory();
+    } else if (trimmed.startsWith("/search ") || trimmed.startsWith("search ")) {
+      const query = trimmed.split(" ").slice(1).join(" ");
+      if (query) {
+        const results = searchEntries(store, query);
+        if (results.length > 0) {
+          showEntry(results[0]);
+          statusBar.setContent(` search: ${query} (${results.length} results) `);
+        } else {
+          statusBar.setContent(` no results for: ${query} `);
+        }
+      }
+    } else if (trimmed === "/quit" || trimmed === "/q" || trimmed === "quit") {
+      screen.destroy();
+      process.exit(0);
     } else if (trimmed.startsWith("/")) {
       statusBar.setContent(` unknown command: ${trimmed} `);
       screen.render();
@@ -287,8 +472,9 @@ export function launchApp(opts: AppOptions = {}) {
 
   function showTutorialList() {
     const tutorials = getAllTutorials();
-    const items = tutorials.map((t) => `${t.id}: ${t.name} - ${t.description}`);
-    editor.box.setContent(["Available tutorials:", "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
+    const items = tutorials.map((t) => `${t.id}: ${t.name}\n    ${t.description}`);
+    main.setContent(["Available tutorials:", "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
+    statusBar.setContent(" tutorials ");
     screen.render();
   }
 
@@ -317,14 +503,44 @@ export function launchApp(opts: AppOptions = {}) {
       }
       lines.push("");
     });
-    editor.box.setContent(lines.join("\n"));
+    main.setContent(lines.join("\n"));
     statusBar.setContent(` tutorial: ${tutorial.name} `);
     screen.render();
   }
 
+  function showHelp() {
+    main.setContent([
+      "KEYBINDS",
+      "",
+      "Ctrl+N     new memory",
+      "Ctrl+S     search",
+      "Ctrl+R     refresh",
+      "Ctrl+Q     quit",
+      "Tab        focus command bar",
+      "?          help",
+      "/          command palette",
+      "",
+      "COMMANDS",
+      "",
+      "/tutorial              list tutorials",
+      "/tutorial <id>         run tutorial",
+      "/help                  show this help",
+      "/mcp                   start MCP server",
+      "/stats                 show statistics",
+      "/timeline              show timeline",
+      "/clear                 clear screen",
+      "/search <query>        search memories",
+      "/new                   create new memory",
+      "/quit                  quit",
+      "",
+      `ROOT: ${store.root}`,
+    ].join("\n"));
+    statusBar.setContent(" help ");
+    screen.render();
+  }
+
   function handleRefresh() {
-    refreshSidebar();
-    refreshTimeline();
+    refreshEntries();
     statusBar.setContent(" refreshed ");
     screen.render();
   }
@@ -334,49 +550,20 @@ export function launchApp(opts: AppOptions = {}) {
     process.exit(0);
   }
 
-  sidebar.on("select", (_el: unknown, idx: number) => {
-    const items = (sidebar as any).items || [];
-    const item = items[idx];
-    if (item && typeof item === "object" && "id" in item) {
-      showEntry(item as MemoryEntry);
-    }
-  });
-
-  timeline.list.on("select", (_el: unknown, idx: number) => {
-    const item = timelineEntries[idx];
-    if (item) showEntry(item);
-  });
-
   screen.key(["c-n"], handleNewMemory);
   screen.key(["c-s"], handleSearch);
-  screen.key(["c-l"], handleEditLabels);
-  screen.key(["c-x"], handleContextPreview);
   screen.key(["c-r"], handleRefresh);
   screen.key(["c-q", "C-c"], handleQuit);
-  screen.key(["/"], () => {
-    inputBar.focus();
-    inputBar.readInput((err: Error | null, value: string) => {
-      withErrorHandling(() => {
-        inputBar.clearValue();
-        if (!value) return;
-        handleCommand(value);
-      }, () => {
-        inputBar.clearValue();
-        screen.render();
-      });
-    });
-  });
   screen.key(["tab"], () => {
     withErrorHandling(() => {
-      const focused = screen.focused;
-      if (focused === editor.box) metadata.box.focus();
-      else if (focused === metadata.box) sidebar.focus();
-      else if (focused === sidebar) timeline.list.focus();
-      else inputBar.focus();
+      (inputBar as any).focus();
       screen.render();
     }, () => {});
   });
-  screen.key(["?"], handleHelp);
+  screen.key(["/"], () => {
+    showCommandPalette();
+  });
+  screen.key(["?"], showHelp);
 
   const globalErrorHandler = (err: Error) => {
     statusBar.setContent(` error: ${err.message.slice(0, 40)} `);
@@ -388,8 +575,22 @@ export function launchApp(opts: AppOptions = {}) {
     globalErrorHandler(err instanceof Error ? err : new Error(String(err)));
   });
 
-  refreshSidebar();
-  refreshTimeline();
-  metadata.render(store, null);
+  inputBar.on("submit", () => {
+    const value = (inputBar as any).value || "";
+    (inputBar as any).clearValue();
+    handleCommand(value);
+  });
+
+  inputBar.on("keypress", (_ch: unknown, key: any) => {
+    if (key.name === "escape") {
+      (inputBar as any).clearValue();
+      (inputBar as any).blur();
+      screen.render();
+    }
+  });
+
+  refreshEntries();
+  renderWelcome();
+  statusBar.setContent(" ready ");
   screen.render();
 }
