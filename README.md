@@ -1,12 +1,12 @@
 <div align="center">
 
-[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.04-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
+[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.06-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
 
 # sonderr-memory
 
 **Local-first, file-backed context engine for AI coding agents.**
 
-Infinite memory through plain text files. TUI-first. No cloud. No database. No limits.
+Infinite memory through plain text files. Best-in-class context and memory MCP. No cloud. No database. No limits.
 
 </div>
 
@@ -27,6 +27,7 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 - **Portable**: `.txt` / `.md` files you can grep, backup, and move
 - **Private**: stored locally under `~/.sonderr-memory/`
 - **Agent-ready**: MCP / CLI interface for any coding agent
+- **Context export**: bounded-context snippets for agent prompts
 
 ## Install
 
@@ -88,6 +89,26 @@ sonderr-memory --help     # help
 - Every entry is a plain `.md` file with frontmatter
 - Append-only raw log. Curated summaries on top.
 - Fast grep, fast search, fast backup.
+
+## MCP Server
+
+sonderr-memory ships with an MCP server for agent integration.
+
+```bash
+sonderr-memory mcp
+```
+
+Tools exposed:
+- `sonderr_memory_save` - save a new memory
+- `sonderr_memory_search` - search memories
+- `sonderr_memory_list` - list all memories
+- `sonderr_memory_get` - get a specific memory
+- `sonderr_memory_update` - update labels
+- `sonderr_memory_delete` - delete a memory
+- `sonderr_memory_link` - link two memories
+- `sonderr_memory_context` - export context for agent
+- `sonderr_memory_stats` - get statistics
+- `sonderr_memory_timeline` - recent memories
 
 ## Development
 
