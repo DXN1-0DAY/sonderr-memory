@@ -4,29 +4,41 @@ set -euo pipefail
 REPO="DXN1-termux/sonderr-memory"
 BIN_NAME="sonderr-memory"
 INSTALL_DIR="${HOME}/.local/bin"
+REPO_DIR="${HOME}/.sonderr-memory"
 
-case "$(uname -s)" in
-  Linux) OS="linux" ;;
-  Darwin) OS="darwin" ;;
-  *) echo "unsupported OS"; exit 1 ;;
-esac
-
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64) ARCH="x64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-esac
-
-ASSET="${BIN_NAME}-${OS}-${ARCH}"
 mkdir -p "${INSTALL_DIR}"
 
-echo "fetching latest release..."
-URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
-TMP="$(mktemp)"
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Bun not found. Installing Bun..."
+  curl -fsSL https://bun.sh/install | bash
+  export PATH="${HOME}/.bun/bin:${PATH}"
+fi
 
-curl -fL "${URL}" -o "${TMP}"
-chmod +x "${TMP}"
-mv "${TMP}" "${INSTALL_DIR}/${BIN_NAME}"
+if [ ! -d "${REPO_DIR}/.git" ]; then
+  echo "cloning repo..."
+  git clone --depth 1 "https://github.com/${REPO}.git" "${REPO_DIR}"
+else
+  echo "updating repo..."
+  git -C "${REPO_DIR}" pull --ff-only
+fi
+
+echo "installing dependencies..."
+cd "${REPO_DIR}"
+bun install
+
+WRAPPER="${INSTALL_DIR}/${BIN_NAME}"
+cat > "${WRAPPER}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_DIR="${REPO_DIR}"
+if [ ! -d "\${REPO_DIR}" ]; then
+  echo "repo missing at \${REPO_DIR}" >&2
+  exit 1
+fi
+cd "\${REPO_DIR}"
+exec bun run src/main.ts "\$@"
+EOF
+chmod +x "${WRAPPER}"
 
 if ! echo "${PATH}" | grep -q "${INSTALL_DIR}"; then
   echo ""
@@ -34,4 +46,5 @@ if ! echo "${PATH}" | grep -q "${INSTALL_DIR}"; then
   echo "  export PATH=\"${INSTALL_DIR}:\${PATH}\""
 fi
 
-echo "installed ${BIN_NAME} -> ${INSTALL_DIR}/${BIN_NAME}"
+echo "installed ${BIN_NAME} -> ${WRAPPER}"
+echo "repo -> ${REPO_DIR}"
