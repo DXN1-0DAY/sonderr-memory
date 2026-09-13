@@ -1,17 +1,19 @@
 import { MemoryEntry, MemoryStore, MemoryMeta } from "./types";
 import * as path from "path";
 import * as fs from "fs";
+import { logger } from "../logger";
+import { ensureStore, ensureDirs } from "../utils/store-helpers";
 
-const ROOT = path.join(process.env.HOME || "/tmp", ".sonderr-memory");
-
-export function ensureRoot(): string {
-  if (!fs.existsSync(ROOT)) fs.mkdirSync(ROOT, { recursive: true });
-  return ROOT;
-}
+const ROOT = (process.env.SONDERR_MEMORY_ROOT || (process.env.HOME ? `${process.env.HOME}/.sonderr-memory` : "/tmp/.sonderr-memory"));
+ensureStore(ROOT);
 
 export function createStore(root = ROOT): MemoryStore {
-  ensureRoot();
+  ensureDirs({ root });
   return { root };
+}
+
+export function getStoreRoot(): string {
+  return ROOT;
 }
 
 export function inboxPath(store: MemoryStore, date = new Date()): string {
@@ -106,6 +108,7 @@ export function saveEntry(
 
   fs.writeFileSync(fullPath, frontmatter);
   entry.path = fullPath;
+  logger.debug(`Saved entry: ${entry.id} to ${fullPath}`);
   return entry;
 }
 
@@ -120,8 +123,8 @@ export function loadEntries(store: MemoryStore, category?: string): MemoryEntry[
         try {
           const text = fs.readFileSync(full, "utf-8");
           entries.push(parseEntry(full, text));
-        } catch {
-          // skip unreadable
+        } catch (err) {
+          logger.warn(`Failed to parse entry: ${full}`, err);
         }
       }
     }
@@ -230,7 +233,26 @@ export function updateEntry(store: MemoryStore, entry: MemoryEntry, patch: Parti
     updated.content,
   ].filter(Boolean).join("\n");
   fs.writeFileSync(updated.path, frontmatter);
+  logger.debug(`Updated entry: ${updated.id}`);
   return updated;
+}
+
+export function deleteEntry(store: MemoryStore, entry: MemoryEntry): void {
+  if (fs.existsSync(entry.path)) {
+    fs.unlinkSync(entry.path);
+    logger.debug(`Deleted entry: ${entry.id}`);
+  }
+}
+
+export function linkEntries(store: MemoryStore, source: MemoryEntry, target: MemoryEntry): MemoryEntry {
+  const updatedSource = updateEntry(store, source, {
+    linkedIds: [...source.linkedIds, target.id],
+  });
+  const updatedTarget = updateEntry(store, target, {
+    linkedIds: [...target.linkedIds, source.id],
+  });
+  logger.debug(`Linked entries: ${source.id} <-> ${target.id}`);
+  return updatedSource;
 }
 
 function parseEntry(fullPath: string, text: string): MemoryEntry {

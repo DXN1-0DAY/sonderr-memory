@@ -1,42 +1,179 @@
 #!/usr/bin/env bun
 import { launchApp } from "./tui/app";
-import { createStore, loadEntries, saveEntry, searchEntries } from "./memory/store";
+import {
+  createStore,
+  loadEntries,
+  saveEntry,
+  searchEntries,
+  getTimeline,
+  getMeta,
+  exportForContext,
+  deleteEntry,
+  linkEntries,
+  updateEntry,
+} from "./memory/store";
+import { MemoryEntry } from "./memory/types";
+import { getStoreRoot } from "./utils/store-helpers";
 
-export function runCLI() {
-  const args = process.argv.slice(2);
-  const command = args[0];
+type Command = (args: string[]) => void;
 
-  switch (command) {
-    case "tui":
-    case "ui":
-    case undefined:
-      launchApp();
-      break;
-    case "remember":
-    case "add": {
-      const store = createStore();
-      const content = args.slice(1).join(" ") || "(empty)";
-      saveEntry(store, "inbox", `cli-${Date.now()}`, content);
-      console.log("saved");
-      break;
+const printJson = (data: unknown) => console.log(JSON.stringify(data, null, 2));
+
+const commands: Record<string, Command> = {
+  tui: () => launchApp(),
+  ui: () => launchApp(),
+  remember: (args) => {
+    const store = createStore();
+    const content = args.join(" ") || "(empty)";
+    const entry = saveEntry(store, "inbox", `cli-${Date.now()}`, content);
+    printJson({ id: entry.id, path: entry.path });
+  },
+  add: (args) => commands.remember(args),
+  search: (args) => {
+    const store = createStore();
+    const query = args[0] || "";
+    const results = searchEntries(store, query);
+    printJson(results.map((r) => ({ id: r.id, source: r.source, content: r.content.slice(0, 100) })));
+  },
+  list: () => {
+    const store = createStore();
+    const entries = loadEntries(store);
+    printJson(entries.map((r) => ({ id: r.id, source: r.source, content: r.content.slice(0, 100) })));
+  },
+  timeline: () => {
+    const store = createStore();
+    const entries = getTimeline(store, 20);
+    printJson(entries.map((r) => ({ id: r.id, createdAt: r.createdAt, content: r.content.slice(0, 80) })));
+  },
+  stats: () => {
+    const store = createStore();
+    const meta = getMeta(store);
+    printJson(meta);
+  },
+  context: (args) => {
+    const store = createStore();
+    const query = args[0] || "";
+    const ctx = exportForContext(store, query, 2000);
+    console.log(ctx);
+  },
+  export: (args) => {
+    const store = createStore();
+    const query = args[0] || "";
+    const ctx = exportForContext(store, query, 5000);
+    console.log(ctx);
+  },
+  delete: (args) => {
+    const store = createStore();
+    const id = args[0];
+    if (!id) {
+      console.error("usage: sonderr-memory delete <id>");
+      process.exit(1);
     }
-    case "search": {
-      const store = createStore();
-      const query = args[1] || "";
-      const results = searchEntries(store, query);
-      console.log(JSON.stringify(results.map((r) => ({ id: r.id, content: r.content.slice(0, 100) })), null, 2));
-      break;
+    const entries = loadEntries(store);
+    const entry = entries.find((e) => e.id.startsWith(id) || e.id === id);
+    if (!entry) {
+      console.error("entry not found");
+      process.exit(1);
     }
-    case "list": {
-      const store = createStore();
-      const entries = loadEntries(store);
-      console.log(JSON.stringify(entries.map((r) => ({ id: r.id, source: r.source, content: r.content.slice(0, 100) })), null, 2));
-      break;
+    deleteEntry(store, entry);
+    console.log("deleted");
+  },
+  link: (args) => {
+    const store = createStore();
+    const [sourceId, targetId] = args;
+    if (!sourceId || !targetId) {
+      console.error("usage: sonderr-memory link <source-id> <target-id>");
+      process.exit(1);
     }
-    default:
-      console.log("unknown command");
-      break;
+    const entries = loadEntries(store);
+    const source = entries.find((e) => e.id.startsWith(sourceId) || e.id === sourceId);
+    const target = entries.find((e) => e.id.startsWith(targetId) || e.id === targetId);
+    if (!source || !target) {
+      console.error("entry not found");
+      process.exit(1);
+    }
+    linkEntries(store, source, target);
+    console.log("linked");
+  },
+  update: (args) => {
+    const store = createStore();
+    const id = args[0];
+    if (!id) {
+      console.error("usage: sonderr-memory update <id> key=value ...");
+      process.exit(1);
+    }
+    const entries = loadEntries(store);
+    const entry = entries.find((e) => e.id.startsWith(id) || e.id === id);
+    if (!entry) {
+      console.error("entry not found");
+      process.exit(1);
+    }
+    const patch: Partial<MemoryEntry> = {};
+    for (let i = 1; i < args.length; i++) {
+      const [key, value] = args[i].split("=");
+      if (key === "project") patch.project = value;
+      if (key === "tags") patch.tags = value.split(",").map((s) => s.trim()).filter(Boolean);
+      if (key === "topics") patch.topics = value.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    const updated = updateEntry(store, entry, patch);
+    printJson({ id: updated.id, updatedAt: updated.updatedAt });
+  },
+  mcp: () => {
+    import("./mcp-server").then(({ createMCPServer }) => {
+      const port = Number(process.env.SONDERR_MEMORY_MCP_PORT) || 3099;
+      createMCPServer(port);
+    }).catch((err) => {
+      console.error("failed to start MCP server:", err);
+      process.exit(1);
+    });
+  },
+  serve: () => {
+    import("./mcp-server").then(({ createMCPServer }) => {
+      const port = Number(process.env.SONDERR_MEMORY_MCP_PORT) || 3099;
+      createMCPServer(port);
+    }).catch((err) => {
+      console.error("failed to start MCP server:", err);
+      process.exit(1);
+    });
+  },
+  help: () => {
+    console.log(`
+sonderr-memory - local-first context engine
+
+commands:
+  tui, ui              launch TUI
+  remember, add <text> save a new memory
+  search <query>       search memories
+  list                 list all memories
+  timeline             recent memories
+  stats                show stats
+  context <query>      export context for agent
+  export <query>       export context (larger)
+  delete <id>          delete a memory
+  link <src> <dst>     link two memories
+  update <id> k=v...   update labels
+  mcp, serve           start MCP server
+  help                 show this help
+
+env:
+  SONDERR_MEMORY_ROOT  memory root (default: ~/.sonderr-memory)
+  SONDERR_MEMORY_MCP_PORT  MCP server port (default: 3099)
+    `);
+  },
+};
+
+const cmd = process.argv[2] || "help";
+const cmdArgs = process.argv.slice(3);
+
+if (commands[cmd]) {
+  try {
+    commands[cmd](cmdArgs);
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
   }
+} else {
+  console.error(`unknown command: ${cmd}`);
+  commands.help([]);
+  process.exit(1);
 }
-
-runCLI();
