@@ -1,4 +1,4 @@
-import { MemoryEntry, MemoryStore } from "./types.ts";
+import { MemoryEntry, MemoryStore, MemoryMeta } from "./types.ts";
 import * as path from "path";
 import * as fs from "fs";
 
@@ -59,6 +59,7 @@ export function saveEntry(
     topics: [],
     people: [],
     tags: [],
+    linkedIds: [],
     ...extra,
   };
 
@@ -97,6 +98,7 @@ export function saveEntry(
     extra.topics?.length ? `topics: ${extra.topics.join(", ")}` : "",
     extra.people?.length ? `people: ${extra.people.join(", ")}` : "",
     extra.tags?.length ? `tags: ${extra.tags.join(", ")}` : "",
+    extra.linkedIds?.length ? `linkedIds: ${extra.linkedIds.join(", ")}` : "",
     "---",
     "",
     content,
@@ -149,6 +151,88 @@ export function searchEntries(store: MemoryStore, query: string): MemoryEntry[] 
   });
 }
 
+export function getMeta(store: MemoryStore): MemoryMeta {
+  const entries = loadEntries(store);
+  const bySource: Record<string, number> = {};
+  const byProject: Record<string, number> = {};
+  const byTopic: Record<string, number> = {};
+  const recentIds: string[] = [];
+
+  for (const entry of entries) {
+    bySource[entry.source] = (bySource[entry.source] || 0) + 1;
+    if (entry.project) byProject[entry.project] = (byProject[entry.project] || 0) + 1;
+    for (const topic of entry.topics) byTopic[topic] = (byTopic[topic] || 0) + 1;
+    if (recentIds.length < 20) recentIds.push(entry.id);
+  }
+
+  return {
+    total: entries.length,
+    bySource,
+    byProject,
+    byTopic,
+    recentIds,
+  };
+}
+
+export function getTimeline(store: MemoryStore, limit = 50): MemoryEntry[] {
+  const entries = loadEntries(store);
+  return entries
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
+}
+
+export function getRelated(store: MemoryStore, entry: MemoryEntry, limit = 10): MemoryEntry[] {
+  const all = loadEntries(store).filter((e) => e.id !== entry.id);
+  const score = (e: MemoryEntry) => {
+    let s = 0;
+    if (e.project === entry.project) s += 3;
+    for (const t of entry.topics) if (e.topics.includes(t)) s += 2;
+    for (const tag of entry.tags) if (e.tags.includes(tag)) s += 1;
+    const commonWords = new Set(
+      e.content.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
+    );
+    for (const w of entry.content.toLowerCase().split(/\W+/).filter((w) => w.length > 3)) {
+      if (commonWords.has(w)) s += 1;
+    }
+    return s;
+  };
+  return all.sort((a, b) => score(b) - score(a)).slice(0, limit);
+}
+
+export function exportForContext(store: MemoryStore, query: string, maxTokens = 2000): string {
+  const results = searchEntries(store, query).slice(0, 5);
+  const parts: string[] = [];
+  let total = 0;
+  for (const entry of results) {
+    const snippet = `[${entry.source}] ${entry.project ?? ""} ${entry.topics.join(" ")}\n${entry.content}\n`;
+    if (total + snippet.length > maxTokens) break;
+    parts.push(snippet);
+    total += snippet.length;
+  }
+  return parts.join("\n---\n");
+}
+
+export function updateEntry(store: MemoryStore, entry: MemoryEntry, patch: Partial<MemoryEntry>): MemoryEntry {
+  const updated = { ...entry, ...patch, updatedAt: new Date().toISOString() };
+  const frontmatter = [
+    "---",
+    `id: ${updated.id}`,
+    `createdAt: ${updated.createdAt}`,
+    `updatedAt: ${updated.updatedAt}`,
+    `source: ${updated.source}`,
+    updated.project ? `project: ${updated.project}` : "",
+    updated.topics?.length ? `topics: ${updated.topics.join(", ")}` : "",
+    updated.people?.length ? `people: ${updated.people.join(", ")}` : "",
+    updated.tags?.length ? `tags: ${updated.tags.join(", ")}` : "",
+    updated.linkedIds?.length ? `linkedIds: ${updated.linkedIds.join(", ")}` : "",
+    "---",
+    "",
+    updated.content,
+  ].filter(Boolean).join("\n");
+  fs.writeFileSync(updated.path, frontmatter);
+  return updated;
+}
+
 function parseEntry(fullPath: string, text: string): MemoryEntry {
   const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   const frontmatter = fmMatch?.[1] ?? "";
@@ -170,6 +254,7 @@ function parseEntry(fullPath: string, text: string): MemoryEntry {
     people: meta.people ? meta.people.split(",").map((s) => s.trim()) : [],
     tags: meta.tags ? meta.tags.split(",").map((s) => s.trim()) : [],
     source: (meta.source as MemoryEntry["source"]) || "inbox",
+    linkedIds: meta.linkedIds ? meta.linkedIds.split(",").map((s) => s.trim()) : [],
     content,
   };
 }
