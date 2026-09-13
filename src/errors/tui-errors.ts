@@ -37,6 +37,17 @@ export function withErrorHandling<T>(fn: () => T, onError: (err: TUIError) => T)
   }
 }
 
+export async function withAsyncErrorHandling<T>(fn: () => Promise<T>, onError: (err: TUIError) => T): Promise<T> {
+  try {
+    return await fn();
+  } catch (raw) {
+    const err = raw instanceof Error
+      ? new TUIError(raw.message, undefined, raw)
+      : new TUIError(String(raw));
+    return onError(err);
+  }
+}
+
 export function formatStatusError(err: TUIError): string {
   const base = ` ${err.message.slice(0, 38)} `;
   const hint = err.hint ? ` (${err.hint})` : "";

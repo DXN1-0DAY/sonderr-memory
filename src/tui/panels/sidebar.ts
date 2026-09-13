@@ -3,7 +3,7 @@ import { MemoryEntry } from "../../memory/types";
 import { safeTry } from "../../errors/tui-errors";
 import { truncate } from "../../utils/array";
 import { formatRelativeTime } from "../format";
-import { Theme, createTheme } from "../theme";
+import { Theme, createTheme, DEFAULT_THEME_CONFIG } from "../theme";
 import { tag } from "../format";
 
 export type SidebarOptions = {
@@ -21,17 +21,18 @@ function isPinned(entry: MemoryEntry): boolean {
   return entry.importance >= 0.8;
 }
 
-function formatSidebarEntry(entry: MemoryEntry): string {
-  const pinned = isPinned(entry) ? "[★] " : "    ";
+function formatSidebarEntry(entry: MemoryEntry, theme: Theme): string {
+  const pinned = isPinned(entry) ? `{fg-${theme.accent}}[★]{/fg-${theme.accent}}` : "    ";
+  const link = entry.linkedIds.length > 0 ? `{fg-${theme.muted}}↗{/fg-${theme.muted}}` : " ";
   const id = entry.id.slice(0, 8);
   const source = entry.source.padEnd(9);
-  const title = truncate(entry.content.split("\n")[0].trim(), 32);
+  const title = truncate(entry.content.split("\n")[0].trim(), 18);
   const time = formatRelativeTime(entry.updatedAt);
-  return `${pinned}${id} | ${source} | ${title} | ${time}`;
+  return `${pinned}${link} ${id} | ${source} | ${title} | {fg-${theme.muted}}${time}{/fg-${theme.muted}}`;
 }
 
 export function createSidebar(opts: SidebarOptions) {
-  const theme = opts.theme || createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const list = blessed.list({
     parent: opts.parent,
     label: " memories ",
@@ -53,14 +54,20 @@ export function createSidebar(opts: SidebarOptions) {
     mouse: true,
     alwaysScroll: true,
     scrollbar: { style: { fg: theme.accent } },
-  } as any);
+  } as any) as any;
+
+  let borderFlashTimer: NodeJS.Timeout | null = null;
+
+  list._theme = theme;
 
   list.on("select", (_el: unknown, idx: number) => {
     if (list.style && list.style.border) {
+      if (borderFlashTimer) clearTimeout(borderFlashTimer);
       const originalFg = (list.style.border as any).fg;
       (list.style.border as any).fg = theme.accentLight;
-      setTimeout(() => {
+      borderFlashTimer = setTimeout(() => {
         (list.style.border as any).fg = originalFg;
+        borderFlashTimer = null;
         if (list.screen) list.screen.render();
       }, 80);
     }
@@ -76,7 +83,8 @@ export function createSidebar(opts: SidebarOptions) {
 export function renderSidebarItems(
   list: any,
   entries: MemoryEntry[],
-  getGroup: (entry: MemoryEntry) => string
+  getGroup: (entry: MemoryEntry) => string,
+  theme?: Theme
 ) {
   const grouped = new Map<string, MemoryEntry[]>();
   for (const entry of entries) {
@@ -86,26 +94,44 @@ export function renderSidebarItems(
     grouped.set(key, arr);
   }
 
-  const theme = list?.style && (list.style as any).fg
-    ? createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } })
-    : createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
-  const t = tag(theme);
+  const resolvedTheme = theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
+  const t = tag(resolvedTheme);
 
   const items: string[] = [];
   const entryMap = new Map<number, MemoryEntry>();
-  let idx = 0;
+  let visualIdx = 0;
+  let firstEntryIdx = -1;
+  const prevSelectedId = list._selectedEntryId;
+
   for (const [group, groupEntries] of grouped) {
     items.push(t.heading(`── ${group} (${groupEntries.length}) ──`));
+    visualIdx++;
     for (const entry of groupEntries.slice(0, 20)) {
-      entryMap.set(idx, entry);
-      items.push(`  ${formatSidebarEntry(entry)}`);
-      idx++;
+      if (firstEntryIdx === -1) firstEntryIdx = visualIdx;
+      entryMap.set(visualIdx, entry);
+      items.push(`  ${formatSidebarEntry(entry, resolvedTheme)}`);
+      visualIdx++;
     }
   }
 
   safeTry(() => {
     list.setItems(items.length ? items : ["(empty)"]);
-    list.select(0);
+    let selectedId: string | undefined;
+    if (prevSelectedId) {
+      for (const [idx, entry] of entryMap) {
+        if (entry.id === prevSelectedId) {
+          list.select(idx);
+          selectedId = prevSelectedId;
+          break;
+        }
+      }
+    }
+    if (!selectedId && firstEntryIdx >= 0) {
+      list.select(firstEntryIdx);
+      const firstEntry = entryMap.get(firstEntryIdx);
+      if (firstEntry) selectedId = firstEntry.id;
+    }
     list._entryMap = entryMap;
+    list._selectedEntryId = selectedId;
   }, undefined);
 }

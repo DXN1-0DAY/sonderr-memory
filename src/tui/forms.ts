@@ -2,11 +2,13 @@ import blessed from "blessed";
 import { MemoryEntry } from "../memory/types";
 import { saveEntry, updateEntry, suggestTags } from "../memory/store";
 import { withErrorHandling } from "../errors/tui-errors";
-import { Theme, createTheme } from "./theme";
+import { Theme, createTheme, DEFAULT_THEME_CONFIG } from "./theme";
 
 function addPlaceholder(input: any, text: string) {
   let active = true;
-  input.value = text;
+  if (!input.value) {
+    input.value = text;
+  }
   input.on("focus", () => {
     if (active && input.value === text) {
       input.value = "";
@@ -48,7 +50,7 @@ export type CreateMemoryOptions = {
 };
 
 export function showCreateMemoryForm(opts: CreateMemoryOptions) {
-  const theme = opts.theme || createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const notify = opts.notify || ((_: string) => {});
 
   const form = blessed.form({
@@ -208,8 +210,14 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
   function validate(): string | null {
     const title = (nameInput as any).value || "";
     const content = (contentInput as any).value || "";
-    if (title === "required" || !title.trim()) return "Title is required";
-    if (content === "required" || !content.trim()) return "Content is required";
+    if (title === "required" || !title.trim()) {
+      flashFieldError(nameInput);
+      return "Title is required";
+    }
+    if (content === "required" || !content.trim()) {
+      flashFieldError(contentInput);
+      return "Content is required";
+    }
     return null;
   }
 
@@ -225,6 +233,23 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
     }, 1500);
   }
 
+  function flashFieldError(input: any) {
+    const originalBorderFg = input.style && input.style.border && input.style.border.fg;
+    if (input.style && input.style.border) {
+      input.style.border = { ...(input.style.border as any), fg: theme.error };
+    }
+    input.style.fg = theme.error;
+    (opts.screen as any).render();
+    setTimeout(() => {
+      if (input.destroyed) return;
+      if (originalBorderFg && input.style && input.style.border) {
+        input.style.border = { ...(input.style.border as any), fg: originalBorderFg };
+      }
+      input.style.fg = theme.fg;
+      (opts.screen as any).render();
+    }, 1500);
+  }
+
   saveBtn.on("press", () => {
     const err = validate();
     if (err) {
@@ -233,32 +258,42 @@ export function showCreateMemoryForm(opts: CreateMemoryOptions) {
       (nameInput as any).focus();
       return;
     }
+    let saved = false;
     withErrorHandling(() => {
       const selectedIdx = (category as any).selected ?? 0;
       const cat = ((category as any).items ?? [])[selectedIdx] as MemoryEntry["source"];
-      const topics = ((topicsInput as any).value || "")
+      const project = (projectInput as any).value === "e.g. my-project" ? undefined : (projectInput as any).value || undefined;
+      const topics = ((topicsInput as any).value === "comma-separated" ? "" : (topicsInput as any).value || "")
         .split(",")
         .map((s: string) => s.trim())
         .filter(Boolean);
       saveEntry(opts.store, cat, (nameInput as any).value || "untitled", (contentInput as any).value || "", {
-        project: (projectInput as any).value || undefined,
+        project,
         topics,
       });
       form.destroy();
       opts.onSaved();
+      saved = true;
     }, () => {
       notify("error saving entry", 3000);
       flashError(saveBtn);
     });
+    if (saved) {
+      opts.onFormClose?.();
+    }
   });
 
   cancelBtn.on("press", () => {
+    opts.onFormClose?.();
     form.destroy();
     (opts.screen as any).render();
   });
 
   opts.screen.append(form);
   (nameInput as any).focus();
+  if ((nameInput as any).value === "required") {
+    (nameInput as any).value = "";
+  }
   (opts.screen as any).render();
 }
 
@@ -267,10 +302,12 @@ export type EditLabelsOptions = {
   store: any;
   entry: MemoryEntry;
   onUpdated: (entry: MemoryEntry) => void;
+  theme?: Theme;
   notify?: (message: string, duration?: number) => void;
 };
 
 export function showEditLabelsForm(opts: EditLabelsOptions) {
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const notify = opts.notify || ((_: string) => {});
 
   const form = blessed.form({
@@ -280,8 +317,8 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     width: "60%",
     height: "50%",
     label: " edit labels ",
-    border: { type: "line", fg: "#FF6A00" },
-    style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+    border: theme.border,
+    style: { fg: theme.fg, bg: theme.bgPanel, focus: { border: theme.focusBorder } },
     keys: true,
     mouse: true,
   } as any);
@@ -293,8 +330,8 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     left: 1,
     width: "90%",
     height: 3,
-    border: { type: "line" },
-    style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+    border: theme.border,
+    style: { fg: theme.fg, bg: theme.bg },
     value: opts.entry.project || "",
     keys: true,
     mouse: true,
@@ -308,8 +345,8 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     left: 1,
     width: "90%",
     height: 3,
-    border: { type: "line" },
-    style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+    border: theme.border,
+    style: { fg: theme.fg, bg: theme.bg },
     value: opts.entry.topics.join(", "),
     keys: true,
     mouse: true,
@@ -323,8 +360,8 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     left: 1,
     width: "90%",
     height: 3,
-    border: { type: "line" },
-    style: { fg: "#e6e6e6", bg: "#0d0d0d" },
+    border: theme.border,
+    style: { fg: theme.fg, bg: theme.bg },
     value: opts.entry.tags.join(", "),
     keys: true,
     mouse: true,
@@ -339,7 +376,7 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     width: 12,
     height: 3,
     mouse: true,
-    style: { bg: "#FF6A00", fg: "#000000", bold: true, focus: { bg: "#ff8533" } },
+    style: { bg: theme.accent, fg: theme.selected.fg, bold: true, focus: { bg: theme.accentLight } },
   } as any);
 
   const cancelBtn = blessed.button({
@@ -350,7 +387,7 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     width: 12,
     height: 3,
     mouse: true,
-    style: { bg: "#333333", fg: "#e6e6e6", focus: { bg: "#444444" } },
+    style: { bg: theme.cancelBg, fg: theme.fg, focus: { bg: theme.cancelFocus } },
   } as any);
 
   const _hintBox = blessed.box({
@@ -359,14 +396,14 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
     left: 1,
     width: "100%-2",
     height: 1,
-    style: { fg: "#e6e6e6", bg: "#1a1a1a" },
+    style: { fg: theme.fg, bg: theme.bgPanel },
     content: " Tab: next | Ctrl+S: save | Esc: cancel ",
   });
 
   const recommended = suggestTags(opts.store, opts.entry, 5);
   const _recommendationBox = blessed.box({
     parent: form,
-    top: "80%",
+    top: "76%",
     left: 1,
     width: "100%-2",
     height: 1,
@@ -380,22 +417,31 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
 
   function flashError(btn: any) {
     (btn as any).setLabel(" error ");
-    (btn as any).style = { bg: "#ff5555", fg: "#000000", bold: true };
+    (btn as any).style = { bg: theme.error, fg: theme.bg, bold: true };
     (opts.screen as any).render();
     setTimeout(() => {
       if ((btn as any).destroyed) return;
       (btn as any).setLabel(" save ");
-      (btn as any).style = { bg: "#FF6A00", fg: "#000000", bold: true, focus: { bg: "#ff8533" } };
+      (btn as any).style = { bg: theme.accent, fg: theme.selected.fg, bold: true, focus: { bg: theme.accentLight } };
       (opts.screen as any).render();
     }, 1500);
   }
 
   saveBtn.on("press", () => {
     withErrorHandling(() => {
+      const project = (projectInput as any).value === "e.g. my-project" ? undefined : (projectInput as any).value || undefined;
+      const topics = ((topicsInput as any).value === "comma-separated" ? "" : (topicsInput as any).value || "")
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+      const tags = ((tagsInput as any).value === "comma-separated" ? "" : (tagsInput as any).value || "")
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter(Boolean);
       const updated = updateEntry(opts.store, opts.entry, {
-        project: (projectInput as any).value || undefined,
-        topics: ((topicsInput as any).value || "").split(",").map((s: string) => s.trim()).filter(Boolean),
-        tags: ((tagsInput as any).value || "").split(",").map((s: string) => s.trim()).filter(Boolean),
+        project,
+        topics,
+        tags,
       });
       form.destroy();
       opts.onUpdated(updated);
@@ -412,16 +458,21 @@ export function showEditLabelsForm(opts: EditLabelsOptions) {
 
   opts.screen.append(form);
   (projectInput as any).focus();
+  if ((projectInput as any).value === "e.g. my-project") {
+    (projectInput as any).value = "";
+  }
   (opts.screen as any).render();
 }
 
 export type SearchOptions = {
   screen: any;
   onSubmit: (query: string) => void;
+  theme?: Theme;
   notify?: (message: string, duration?: number) => void;
 };
 
 export function showSearchPrompt(opts: SearchOptions) {
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const prompt = blessed.prompt({
     parent: opts.screen,
     top: "center",
@@ -429,8 +480,8 @@ export function showSearchPrompt(opts: SearchOptions) {
     width: "60%",
     height: "shrink",
     label: " search ",
-    border: { type: "line", fg: "#FF6A00" },
-    style: { fg: "#e6e6e6", bg: "#1a1a1a", focus: { border: { fg: "#FF6A00" } } },
+    border: theme.border,
+    style: { fg: theme.fg, bg: theme.bgPanel, focus: { border: theme.focusBorder } },
     keys: true,
     mouse: true,
   } as any);
@@ -441,7 +492,7 @@ export function showSearchPrompt(opts: SearchOptions) {
     left: 1,
     width: "100%-2",
     height: 1,
-    style: { fg: "#e6e6e6", bg: "#1a1a1a" },
+    style: { fg: theme.fg, bg: theme.bgPanel },
     content: " Enter: search | Esc: cancel ",
   });
 

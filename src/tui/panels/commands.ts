@@ -17,6 +17,12 @@ export type CommandDef = {
 
 export const COMMANDS: CommandDef[] = [
   {
+    cmd: "/commands",
+    desc: "list all commands (this view)",
+    category: "navigation",
+    examples: ["/commands"],
+  },
+  {
     cmd: "/help",
     desc: "show command reference",
     shortcuts: ["?"],
@@ -24,16 +30,28 @@ export const COMMANDS: CommandDef[] = [
     examples: ["/help"],
   },
   {
-    cmd: "/commands",
-    desc: "list all commands (this view)",
-    category: "navigation",
-    examples: ["/commands"],
-  },
-  {
     cmd: "/clear",
     desc: "clear the main view",
     category: "navigation",
     examples: ["/clear"],
+  },
+  {
+    cmd: "/link <id>",
+    desc: "link selected entry to another",
+    category: "memory",
+    examples: ["/link <id>"],
+  },
+  {
+    cmd: "/related",
+    desc: "show related entries",
+    category: "memory",
+    examples: ["/related"],
+  },
+  {
+    cmd: "/graph",
+    desc: "show relationship graph",
+    category: "memory",
+    examples: ["/graph"],
   },
   {
     cmd: "/new",

@@ -3,7 +3,7 @@ import { MemoryEntry } from "../../memory/types";
 import { MemoryStore } from "../../memory/types";
 import { getRelated, loadEntries } from "../../memory/store";
 import { withErrorHandling } from "../../errors/tui-errors";
-import { Theme, createTheme } from "../../tui/theme";
+import { Theme, createTheme, DEFAULT_THEME_CONFIG } from "../../tui/theme";
 import { tag } from "../../tui/format";
 
 export type MetadataOptions = {
@@ -17,7 +17,7 @@ export type MetadataOptions = {
 };
 
 export function createMetadataPanel(opts: MetadataOptions) {
-  const theme = opts.theme || createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const box = blessed.box({
     parent: opts.parent,
     label: " metadata ",
@@ -43,13 +43,14 @@ export function createMetadataPanel(opts: MetadataOptions) {
 
   function render(store: MemoryStore, entry: MemoryEntry | null) {
     withErrorHandling(() => {
+      const t = tag(theme);
       if (!entry) {
         if (metadataTransitionTimer) clearTimeout(metadataTransitionTimer);
-        box.setContent("Select an entry to view metadata.");
+        box.setContent(t.muted("Select an entry to view metadata."));
+        box.scrollTo(0);
         if (box.screen) box.screen.render();
         return;
       }
-      const t = tag(theme);
       const lines = [
         `${t.label("ID:")}        ${entry.id}`,
         `${t.label("Short ID:")}  ${entry.id.slice(0, 8)}`,
@@ -59,8 +60,8 @@ export function createMetadataPanel(opts: MetadataOptions) {
         `${t.label("Project:")}   ${entry.project || "(none)"}`,
         `${t.label("Topics:")}    ${entry.topics.join(", ") || "(none)"}`,
         `${t.label("People:")}    ${entry.people.join(", ") || "(none)"}`,
-        `${t.label("Tags:")}      ${entry.tags.join(", ") || "(none)"}`,
-        `${t.label("Linked:")}    ${entry.linkedIds.length > 0 ? entry.linkedIds.map((id: string) => id.slice(0, 8)).join(", ") : "(none)"}`,
+        `${t.label("Tags:")}      ${entry.tags.length > 0 ? entry.tags.map((tag) => `{bold}{bg-${theme.accent}}{fg-${theme.bg}} ${tag} {/fg-${theme.bg}}{/bg-${theme.accent}}{/bold}`).join("  ") : t.muted("(none)")}`,
+        `${t.label("Linked:")}    ${entry.linkedIds.length > 0 ? entry.linkedIds.map((id: string) => id.slice(0, 8)).join(", ") : t.muted("(none)")}`,
         `${t.label("Path:")}      ${entry.path}`,
       ];
       const allEntries = loadEntries(store);
@@ -69,7 +70,7 @@ export function createMetadataPanel(opts: MetadataOptions) {
         .filter((e): e is MemoryEntry => Boolean(e));
       const relatedEntries = getRelated(store, entry, 5);
       lines.push("");
-      lines.push(t.heading("=== Graph ==="));
+      lines.push(t.heading("GRAPH"));
       lines.push("");
       if (linkedEntries.length > 0) {
         lines.push(`${t.label("Linked")} (${linkedEntries.length}):`);
@@ -90,14 +91,16 @@ export function createMetadataPanel(opts: MetadataOptions) {
       }
       if (metadataTransitionTimer) clearTimeout(metadataTransitionTimer);
       box.setContent("");
-      if (box.screen) box.screen.render();
       metadataTransitionTimer = setTimeout(() => {
+        if (!box.screen) return;
         box.setContent(lines.join("\n"));
+        box.scrollTo(0);
+        box.screen.render();
         metadataTransitionTimer = null;
       }, 20);
     }, () => {
       box.setContent("Error rendering metadata.");
-      if (box.screen) box.screen.render();
+      box.scrollTo(0);
     });
   }
 

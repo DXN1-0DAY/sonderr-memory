@@ -334,15 +334,27 @@ function suggestCommand(input: string): string | undefined {
 
 const commands: Record<string, CommandHandler> = {
   tui: async () => {
-    const { launchApp } = await import("./tui/app");
-    launchApp();
-    return { ok: true };
+    try {
+      const { launchApp } = await import("./tui/app");
+      launchApp();
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`tui error: ${msg}`);
+      process.exit(1);
+    }
   },
 
   ui: async () => {
-    const { launchApp } = await import("./tui/app");
-    launchApp();
-    return { ok: true };
+    try {
+      const { launchApp } = await import("./tui/app");
+      launchApp();
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`tui error: ${msg}`);
+      process.exit(1);
+    }
   },
 
   remember: (args, _flags) => {

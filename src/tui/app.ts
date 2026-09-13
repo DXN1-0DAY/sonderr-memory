@@ -1,6 +1,6 @@
 import { MemoryEntry, MemoryStore } from "../memory/types";
 import { createStore, loadEntries, searchEntries, getTimeline, getRelated, exportForContext, saveEntry, getMeta, saveSessionState, loadSessionState, linkEntries } from "../memory/store";
-import { withErrorHandling } from "../errors/tui-errors";
+import { withErrorHandling, withAsyncErrorHandling } from "../errors/tui-errors";
 import { getAllTutorials, getTutorial } from "../tutorial";
 import { loadConfig, saveConfig, getConfigPath } from "../config";
 import { checkForUpdate } from "../update";
@@ -12,6 +12,7 @@ import { createSidebar, renderSidebarItems, type SidebarOptions } from "./panels
 import { createEditor, type EditorOptions } from "./panels/editor";
 import { createTimeline, type TimelineOptions } from "./panels/timeline";
 import { createMetadataPanel, type MetadataOptions } from "./panels/metadata";
+import { COMMANDS, formatCommands } from "./panels/commands";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -126,9 +127,14 @@ export function launchApp(opts: AppOptions = {}) {
     });
   }, () => null) as any;
 
+  if (!screen || !main || !inputBar || !helpFooter || !statusBar) {
+    logger.error("tui", "Failed to initialize terminal widgets.");
+    process.exit(1);
+  }
+
   let sidebar: any = null;
   let editor: any = null;
-  let timelineList: any = null;
+  let timeline: any = null;
   let metadataPanel: any = null;
   let entries: MemoryEntry[] = [];
   let selectedEntry: MemoryEntry | null = null;
@@ -139,9 +145,13 @@ export function launchApp(opts: AppOptions = {}) {
   let lastPersistedDraft = "";
   let statusBarFlashTimer: NodeJS.Timeout | null = null;
   let mainTransitionTimer: NodeJS.Timeout | null = null;
+  let flashModalTimer: NodeJS.Timeout | null = null;
   let paletteOpen = false;
+  let paletteInstance: any = null;
   let recentCommands: string[] = [];
   let activeContext: "idle" | "sidebar" | "editor" | "timeline" | "metadata" | "input" | "modal" | "palette" = "idle";
+  let lastPanelContext: typeof activeContext = "idle";
+  let notifyActive = false;
 
   function getContextHint(): string {
     switch (activeContext) {
@@ -167,10 +177,19 @@ export function launchApp(opts: AppOptions = {}) {
   function updateContextHint(context: typeof activeContext) {
     activeContext = context;
     const hint = getContextHint();
-    if (helpFooter) {
-      (helpFooter as any).setContent(hint);
+    if (context !== "modal" && context !== "palette" && context !== "idle") {
+      lastPanelContext = context as typeof lastPanelContext;
     }
-    screen.render();
+    if (helpFooter) {
+      (helpFooter as any).setContent("");
+      screen.render();
+      setTimeout(() => {
+        if (helpFooter) {
+          (helpFooter as any).setContent(hint);
+          screen.render();
+        }
+      }, 30);
+    }
   }
 
   function isWide() {
@@ -184,13 +203,13 @@ export function launchApp(opts: AppOptions = {}) {
 
     if (sidebar) sidebar.destroy();
     if (editor) editor.destroy();
-    if (timelineList) timelineList.destroy();
+    if (timeline) timeline.list.destroy();
     if (metadataPanel) metadataPanel.destroy();
 
     if (wide) {
       const sidebarW = SIDEBAR_WIDTH;
       const metaW = META_WIDTH;
-      const editorW = mainWidth - sidebarW - metaW - 2;
+      const editorW = Math.max(1, mainWidth - sidebarW - metaW - 2);
       const editorH = Math.max(1, mainHeight - Math.floor(mainHeight * 0.35) - 1);
       const timelineH = Math.max(1, mainHeight - editorH - 1);
 
@@ -209,29 +228,27 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
-      sidebar.on("focus", () => updateContextHint("sidebar"));
-      sidebar.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      sidebar.on("focus", () => {
+        lastPanelContext = "sidebar" as typeof lastPanelContext;
+        updateContextHint("sidebar");
       });
+      sidebar.on("blur", () => {});
 
       editor = createEditor({
         parent: main,
         top: 0,
         left: sidebarW + 1,
         width: `${editorW}`,
-        height: "100%",
+        height: `${editorH}`,
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
-      editor.box.on("focus", () => updateContextHint("editor"));
-      editor.box.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      editor.box.on("focus", () => {
+        lastPanelContext = "editor" as typeof lastPanelContext;
+        updateContextHint("editor");
       });
+      editor.box.on("blur", () => {});
 
       metadataPanel = createMetadataPanel({
         parent: main,
@@ -243,14 +260,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
-      metadataPanel.box.on("focus", () => updateContextHint("metadata"));
-      metadataPanel.box.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      metadataPanel.box.on("focus", () => {
+        lastPanelContext = "metadata" as typeof lastPanelContext;
+        updateContextHint("metadata");
       });
+      metadataPanel.box.on("blur", () => {});
 
-      timelineList = createTimeline({
+      timeline = createTimeline({
         parent: main,
         top: `${editorH + 1}`,
         left: sidebarW + 1,
@@ -258,14 +274,18 @@ export function launchApp(opts: AppOptions = {}) {
         height: `${timelineH}`,
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
+        onSelect: (entry) => {
+          showEntry(entry);
+        },
       });
 
-      timelineList.on("focus", () => updateContextHint("timeline"));
-      timelineList.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      timeline.render(getTimeline(store, 20));
+
+      timeline.list.on("focus", () => {
+        lastPanelContext = "timeline" as typeof lastPanelContext;
+        updateContextHint("timeline");
       });
+      timeline.list.on("blur", () => {});
     } else {
       const editorH = Math.max(1, mainHeight - Math.floor(mainHeight * 0.35) - 1);
       const timelineH = Math.max(1, mainHeight - editorH - 1);
@@ -280,31 +300,13 @@ export function launchApp(opts: AppOptions = {}) {
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
       });
 
-      editor.box.on("focus", () => updateContextHint("editor"));
-      editor.box.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      editor.box.on("focus", () => {
+        lastPanelContext = "editor" as typeof lastPanelContext;
+        updateContextHint("editor");
       });
+      editor.box.on("blur", () => {});
 
-      metadataPanel = createMetadataPanel({
-        parent: main,
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        theme,
-        padding: { top: 1, bottom: 1, left: 1, right: 1 },
-      });
-
-      metadataPanel.box.on("focus", () => updateContextHint("metadata"));
-      metadataPanel.box.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
-      });
-
-      timelineList = createTimeline({
+      timeline = createTimeline({
         parent: main,
         top: `${editorH + 1}`,
         left: 0,
@@ -312,19 +314,23 @@ export function launchApp(opts: AppOptions = {}) {
         height: `${timelineH}`,
         theme,
         padding: { top: 1, bottom: 1, left: 1, right: 1 },
+        onSelect: (entry) => {
+          showEntry(entry);
+        },
       });
 
-      timelineList.on("focus", () => updateContextHint("timeline"));
-      timelineList.on("blur", () => {
-        if (activeContext !== "modal" && activeContext !== "palette") {
-          updateContextHint("idle");
-        }
+      timeline.render(getTimeline(store, 20));
+
+      timeline.list.on("focus", () => {
+        lastPanelContext = "timeline" as typeof lastPanelContext;
+        updateContextHint("timeline");
       });
+      timeline.list.on("blur", () => {});
     }
 
     if (selectedEntry) {
       editor.render(selectedEntry);
-      metadataPanel.render(store, selectedEntry);
+      if (metadataPanel) metadataPanel.render(store, selectedEntry);
     }
     screen.render();
   }
@@ -350,7 +356,13 @@ export function launchApp(opts: AppOptions = {}) {
     return withErrorHandling(() => {
       if (!fs.existsSync(CRASH_RECOVERY_PATH)) return false;
       const raw = fs.readFileSync(CRASH_RECOVERY_PATH, "utf-8");
-      const data = JSON.parse(raw);
+      let data: { value?: string; ts: number };
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        fs.unlinkSync(CRASH_RECOVERY_PATH);
+        return false;
+      }
       if (Date.now() - data.ts > MAX_RECOVERY_AGE_MS) {
         fs.unlinkSync(CRASH_RECOVERY_PATH);
         return false;
@@ -368,23 +380,42 @@ export function launchApp(opts: AppOptions = {}) {
     withErrorHandling(() => {
       if (!fs.existsSync(CRASH_RECOVERY_PATH)) return;
       const raw = fs.readFileSync(CRASH_RECOVERY_PATH, "utf-8");
-      const data = JSON.parse(raw);
+      let data: { value?: string; ts: number };
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        fs.unlinkSync(CRASH_RECOVERY_PATH);
+        return;
+      }
       if (Date.now() - data.ts > MAX_RECOVERY_AGE_MS) {
         fs.unlinkSync(CRASH_RECOVERY_PATH);
         return;
       }
       const ageMin = Math.floor((Date.now() - data.ts) / 60000);
-      statusBar.setContent(` recovered draft (${ageMin}m old) — type /recover to restore `);
+      setStatus(` recovered draft (${ageMin}m old) — type /recover to restore `);
       flashStatusBar();
     }, () => {});
   }
 
+  function setStatus(content: string) {
+    if (statusTimer) {
+      clearTimeout(statusTimer);
+      statusTimer = null;
+    }
+    notifyActive = false;
+    statusBar.setContent(content);
+    screen.render();
+  }
+
   function notify(message: string, duration = 2000) {
     if (statusTimer) clearTimeout(statusTimer);
+    notifyActive = true;
     statusBar.setContent(` ${message} `);
     flashStatusBar();
     statusTimer = setTimeout(() => {
       statusTimer = null;
+      if (!notifyActive) return;
+      notifyActive = false;
       const contextLabel = activeContext === "idle" ? "ready" : activeContext;
       statusBar.setContent(` ${contextLabel} `);
       screen.render();
@@ -410,6 +441,11 @@ export function launchApp(opts: AppOptions = {}) {
 
   function transitionMain(content: string) {
     if (mainTransitionTimer) clearTimeout(mainTransitionTimer);
+    if (!content) {
+      main.setContent("");
+      screen.render();
+      return;
+    }
     main.setContent("");
     screen.render();
     mainTransitionTimer = setTimeout(() => {
@@ -421,11 +457,13 @@ export function launchApp(opts: AppOptions = {}) {
 
   function flashModal(form: any) {
     if (!form || !form.style || !form.style.border) return;
+    if (flashModalTimer) clearTimeout(flashModalTimer);
     const originalFg = (form.style.border as any).fg;
     (form.style.border as any).fg = ACCENT;
     screen.render();
-    setTimeout(() => {
+    flashModalTimer = setTimeout(() => {
       (form.style.border as any).fg = originalFg;
+      flashModalTimer = null;
       screen.render();
     }, 200);
   }
@@ -558,7 +596,7 @@ export function launchApp(opts: AppOptions = {}) {
       config.usageStats = { sessionCount: 1, lastUsedAt: new Date().toISOString(), commandCounts: {} };
       saveConfig(config);
       prompt.destroy();
-      updateContextHint("idle");
+      updateContextHint(lastPanelContext);
       screen.render();
       notify("usage stats enabled — local only", 3000);
     });
@@ -567,7 +605,7 @@ export function launchApp(opts: AppOptions = {}) {
       config.enableUsageStats = false;
       saveConfig(config);
       prompt.destroy();
-      updateContextHint("idle");
+      updateContextHint(lastPanelContext);
       screen.render();
       notify("usage stats disabled", 3000);
     });
@@ -597,7 +635,7 @@ export function launchApp(opts: AppOptions = {}) {
     withErrorHandling(() => {
       if (editor) editor.render(entry);
       if (metadataPanel) metadataPanel.render(store, entry);
-      statusBar.setContent(`loaded: ${entry.path.slice(0, 40)}`);
+      setStatus(`loaded: ${entry.path.slice(0, 40)}`);
       flashStatusBar();
     }, () => {
       notify("error loading entry", 4000);
@@ -618,10 +656,10 @@ export function launchApp(opts: AppOptions = {}) {
       const filterStr = Object.keys(currentFilter).length > 0
         ? ` | filter: ${Object.entries(currentFilter).map(([k, v]) => `${k}=${v}`).join(", ")}`
         : "";
-      statusBar.setContent(`${results.length} results | ${currentSort.field} ${currentSort.direction}`);
+      setStatus(`${results.length} results | ${currentSort.field} ${currentSort.direction}`);
       flashStatusBar();
     }, () => {
-      statusBar.setContent(" error rendering results ");
+      setStatus(" error rendering results ");
       flashStatusBar();
     });
   }
@@ -629,11 +667,14 @@ export function launchApp(opts: AppOptions = {}) {
   function refreshEntries() {
     withErrorHandling(() => {
       entries = loadEntries(store);
-      if (entries.length > 0) {
-        showRecentMemories();
+      if (sidebar) {
+        renderSidebarItems(sidebar, entries, (e) => e.source);
+      }
+      if (timeline && typeof timeline.render === "function") {
+        timeline.render(getTimeline(store, 20));
       }
     }, () => {
-      statusBar.setContent(" error loading entries (Ctrl+R to retry) ");
+      setStatus(" error loading entries (Ctrl+R to retry) ");
       flashStatusBar();
     });
   }
@@ -643,7 +684,7 @@ export function launchApp(opts: AppOptions = {}) {
       const recent = getTimeline(store, 20);
       if (recent.length === 0) {
         transitionMain("No memories yet. Create your first memory with Ctrl+N.");
-        statusBar.setContent("empty");
+        setStatus("empty");
         flashStatusBar();
         screen.render();
         return;
@@ -665,7 +706,7 @@ export function launchApp(opts: AppOptions = {}) {
       }
 
       transitionMain([t.heading("RECENT MEMORIES"), "", ...lines].join("\n"));
-      statusBar.setContent(`${recent.length} memories`);
+      setStatus(`${recent.length} memories`);
       flashStatusBar();
     }, () => {
       notify("error loading memories");
@@ -673,17 +714,18 @@ export function launchApp(opts: AppOptions = {}) {
   }
 
   function handleNewMemory() {
+    if (formOpen) return;
     formOpen = true;
     updateContextHint("modal");
     showCreateMemoryForm({
       screen,
       store,
-      theme: createTheme(config),
+      theme,
       onSaved: () => refreshEntries(),
       notify,
       onFormClose: () => {
         formOpen = false;
-        updateContextHint("idle");
+        updateContextHint(lastPanelContext);
       },
       contextEntry: selectedEntry ?? undefined,
     });
@@ -713,13 +755,13 @@ export function launchApp(opts: AppOptions = {}) {
     (prompt as any).input("query", (err: Error | null, value: string) => {
       withErrorHandling(() => {
         prompt.destroy();
-        updateContextHint("idle");
+        updateContextHint(lastPanelContext);
         if (value) {
           saveSessionState(store, { lastQuery: value });
           const results = searchEntries(store, value);
           if (results.length > 0) {
             showEntry(results[0]);
-            statusBar.setContent(` search: ${value} (${results.length} results) `);
+            setStatus(` search: ${value} (${results.length} results) `);
           } else {
             notify(`no results: ${value.slice(0, 20)}`);
           }
@@ -727,7 +769,7 @@ export function launchApp(opts: AppOptions = {}) {
         }
       }, () => {
         prompt.destroy();
-        updateContextHint("idle");
+        updateContextHint(lastPanelContext);
         screen.render();
       });
     });
@@ -767,6 +809,7 @@ export function launchApp(opts: AppOptions = {}) {
     };
 
     for (const item of [
+      { cmd: "/commands", desc: "list all commands" },
       { cmd: "/tutorial", desc: "list tutorials" },
       { cmd: "/tutorial <id>", desc: "run tutorial" },
       { cmd: "/help", desc: "show help" },
@@ -843,6 +886,7 @@ export function launchApp(opts: AppOptions = {}) {
 
   function showCommandPalette() {
     const commandList = [
+      { cmd: "/commands", desc: "list all commands" },
       { cmd: "/tutorial", desc: "list tutorials" },
       { cmd: "/tutorial <id>", desc: "run tutorial" },
       { cmd: "/help", desc: "show help" },
@@ -868,7 +912,14 @@ export function launchApp(opts: AppOptions = {}) {
       desc: t.name,
     }));
 
-    const allItems = [...commandList, ...tutorialList];
+    const allItems = [
+      ...commandList,
+      ...tutorialList,
+      ...pluginCommands.map((c) => ({
+        cmd: `/${c.name}`,
+        desc: c.description,
+      })),
+    ];
 
     const palette = withErrorHandling(() => {
       return require("blessed").box({
@@ -925,6 +976,7 @@ export function launchApp(opts: AppOptions = {}) {
 
     if (!input || !list) return;
 
+    paletteInstance = palette;
     paletteOpen = true;
     let currentItems = getRecommendedCommands();
 
@@ -950,11 +1002,13 @@ export function launchApp(opts: AppOptions = {}) {
 
     (input as any).on("keypress", (_ch: unknown, key: any) => {
       if (key.name === "escape") {
+        if (!paletteInstance) return;
         paletteOpen = false;
-        input.destroy();
+        paletteInstance = null;
+        (input as any).destroy();
         palette.destroy();
-        updateContextHint("idle");
-        statusBar.setContent(" ready ");
+        updateContextHint(lastPanelContext);
+        setStatus(" ready ");
         screen.render();
       } else if (key.name === "up") {
         const current = (list as any).selected || 0;
@@ -970,10 +1024,12 @@ export function launchApp(opts: AppOptions = {}) {
 
     (input as any).on("submit", () => {
       const value = (input as any).value || "";
+      if (!paletteInstance) return;
       paletteOpen = false;
+      paletteInstance = null;
       input.destroy();
       palette.destroy();
-      updateContextHint("idle");
+      updateContextHint(lastPanelContext);
       const selectedIdx = (list as any).selected || 0;
       const selected = currentItems[selectedIdx];
       if (selected) {
@@ -981,7 +1037,7 @@ export function launchApp(opts: AppOptions = {}) {
       } else if (value.trim()) {
         handleCommand(value.trim());
       } else {
-        statusBar.setContent(" ready ");
+        setStatus(" ready ");
         screen.render();
       }
     });
@@ -1007,13 +1063,19 @@ export function launchApp(opts: AppOptions = {}) {
       showTutorial(trimmed.split(" ")[1]);
     } else if (trimmed === "/help" || trimmed === "help") {
       showHelp();
+    } else if (trimmed === "/commands" || trimmed === "commands") {
+      const commandsText = formatCommands();
+      transitionMain(commandsText);
+      setStatus("commands");
+      flashStatusBar();
+      screen.render();
     } else if (trimmed === "/mcp" || trimmed === "mcp") {
       notify("starting MCP...", 3000);
       screen.render();
       import("../mcp-server").then(({ createMCPServer }) => {
         const port = Number(process.env.SONDERR_MEMORY_MCP_PORT) || 3099;
         createMCPServer(port);
-        statusBar.setContent(`MCP: :${port}`);
+        setStatus(`MCP: :${port}`);
         screen.render();
       }).catch((err) => {
         notify("MCP: error", 4000);
@@ -1043,7 +1105,7 @@ export function launchApp(opts: AppOptions = {}) {
         ...Object.entries(stats.projects).map(([k, v]) => `${t.label(`${k}:`)} ${v}`),
       ];
       transitionMain(lines.join("\n"));
-      statusBar.setContent("stats");
+      setStatus("stats");
       flashStatusBar();
       screen.render();
     } else if (trimmed === "/timeline" || trimmed === "timeline") {
@@ -1055,7 +1117,7 @@ export function launchApp(opts: AppOptions = {}) {
         ...recent.map((r) => `${r.createdAt} | ${r.source} | ${r.content.split("\n")[0].slice(0, 60)}`),
       ];
       transitionMain(lines.join("\n") || "(empty)");
-      statusBar.setContent("timeline");
+      setStatus("timeline");
       flashStatusBar();
       screen.render();
     } else if (trimmed === "/clear" || trimmed === "clear") {
@@ -1070,7 +1132,7 @@ export function launchApp(opts: AppOptions = {}) {
         const results = searchEntries(store, query);
         if (results.length > 0) {
           showEntry(results[0]);
-          statusBar.setContent(` search: ${query} (${results.length} results) `);
+          setStatus(` search: ${query} (${results.length} results) `);
           flashStatusBar();
         } else {
           notify(`no results: ${query.slice(0, 20)}`);
@@ -1084,7 +1146,7 @@ export function launchApp(opts: AppOptions = {}) {
         const value = args.slice(colonIdx + 1).trim();
         if (field && value) {
           currentFilter[field] = value;
-          statusBar.setContent(` filter: ${field}=${value} `);
+          setStatus(` filter: ${field}=${value} `);
           screen.render();
         }
       }
@@ -1097,13 +1159,13 @@ export function launchApp(opts: AppOptions = {}) {
         } else {
           currentSort = { field, direction: "desc" };
         }
-        statusBar.setContent(` sort: ${currentSort.field} ${currentSort.direction} `);
+        setStatus(` sort: ${currentSort.field} ${currentSort.direction} `);
         screen.render();
       }
     } else if (trimmed === "/clearfilters" || trimmed === "clearfilters") {
       currentFilter = {};
       currentSort = { field: "relevance", direction: "desc" };
-      statusBar.setContent(" filters cleared ");
+      setStatus(" filters cleared ");
       screen.render();
     } else if (trimmed === "/telemetry" || trimmed === "telemetry") {
       config.enableUsageStats = !config.enableUsageStats;
@@ -1127,9 +1189,19 @@ export function launchApp(opts: AppOptions = {}) {
     } else if (trimmed.startsWith("/plugins toggle ") || trimmed.startsWith("plugins toggle ")) {
       const id = trimmed.split(/\s+/).slice(2).join(" ");
       if (id) handlePluginToggle(id);
-    } else if (trimmed.startsWith("/")) {
-      notify(`unknown: ${trimmed.slice(0, 20)}`, 4000);
-      screen.render();
+    } else {
+      const pluginCmd = pluginCommands.find(
+        (c) => trimmed === `/${c.name}` || trimmed === c.name || trimmed.startsWith(`/${c.name} `) || trimmed.startsWith(`${c.name} `)
+      );
+      if (pluginCmd) {
+        const args = trimmed.split(/\s+/).slice(1);
+        withErrorHandling(() => pluginCmd.handler(store, args), () => {
+          notify(`plugin command error: ${pluginCmd.name}`);
+        });
+      } else if (trimmed.startsWith("/")) {
+        notify(`unknown: ${trimmed.slice(0, 20)}`, 4000);
+        screen.render();
+      }
     }
   }
 
@@ -1138,7 +1210,7 @@ export function launchApp(opts: AppOptions = {}) {
     const t = tag(theme);
     const items = tutorials.map((tut) => `${tut.id}: ${tut.name}\n    ${tut.description}`);
     main.setContent([t.heading("Available tutorials:"), "", ...items, "", "Usage: /tutorial <id>"].join("\n"));
-    statusBar.setContent("tutorials");
+    setStatus("tutorials");
     screen.render();
   }
 
@@ -1159,7 +1231,7 @@ export function launchApp(opts: AppOptions = {}) {
       ...(registry.list().length > 0 ? ["", "Usage: /plugins toggle <id>", "       /plugins <filter>"] : ["", "(no plugin manager configured)"]),
     ];
     main.setContent(lines.join("\n"));
-    statusBar.setContent(`plugins: ${plugins.length}`);
+    setStatus(`plugins: ${plugins.length}`);
     screen.render();
   }
 
@@ -1202,7 +1274,7 @@ export function launchApp(opts: AppOptions = {}) {
       lines.push("");
     });
     main.setContent(lines.join("\n"));
-    statusBar.setContent(`tutorial: ${tutorial.name.slice(0, 25)}`);
+    setStatus(`tutorial: ${tutorial.name.slice(0, 25)}`);
     screen.render();
   }
 
@@ -1241,7 +1313,7 @@ export function launchApp(opts: AppOptions = {}) {
       "",
       `ROOT: ${store.root}`,
     ].join("\n"));
-    statusBar.setContent("help");
+    setStatus("help");
     screen.render();
   }
 
@@ -1252,12 +1324,17 @@ export function launchApp(opts: AppOptions = {}) {
   }
 
   function handleQuit() {
-    if (selectedEntry) {
-      saveSessionState(store, { lastEntryId: selectedEntry.id });
-    }
-    clearDraft();
-    screen.destroy();
-    process.exit(0);
+    withErrorHandling(() => {
+      if (selectedEntry) {
+        saveSessionState(store, { lastEntryId: selectedEntry.id });
+      }
+      clearDraft();
+      screen.destroy();
+      process.exit(0);
+    }, () => {
+      clearDraft();
+      process.exit(1);
+    });
   }
 
   screen.key(["c-n"], handleNewMemory);
@@ -1265,19 +1342,28 @@ export function launchApp(opts: AppOptions = {}) {
   screen.key(["c-r"], handleRefresh);
   screen.key(["c-q", "C-c"], handleQuit);
   screen.key(["tab"], () => {
+    if (formOpen) return;
     withErrorHandling(() => {
       (inputBar as any).focus();
-      statusBar.setContent(" ready ");
+      setStatus(" ready ");
       screen.render();
     }, () => {});
   });
   screen.key(["/"], () => {
+    if (formOpen) return;
     showCommandPalette();
   });
-  screen.key(["?"], showHelp);
+  screen.key(["?"], () => {
+    if (formOpen) return;
+    showHelp();
+  });
 
   screen.on("resize", () => {
-    layoutPanels();
+    withErrorHandling(() => {
+      layoutPanels();
+    }, () => {
+      logger.error("tui", "Failed to layout panels on resize.");
+    });
   });
 
   const globalErrorHandler = (err: Error) => {
@@ -1300,11 +1386,7 @@ export function launchApp(opts: AppOptions = {}) {
   });
 
   inputBar.on("focus", () => updateContextHint("input"));
-  inputBar.on("blur", () => {
-    if (activeContext !== "modal" && activeContext !== "palette") {
-      updateContextHint("idle");
-    }
-  });
+  inputBar.on("blur", () => {});
 
   inputBar.on("keypress", (_ch: unknown, key: any) => {
     if (key.name === "escape") {
@@ -1349,12 +1431,17 @@ export function launchApp(opts: AppOptions = {}) {
   }
 
   (async () => {
-    const latest = await checkForUpdate("0.0.02");
-    if (latest) {
-      notify(`update: ${latest.slice(0, 20)}`);
-    } else {
-      statusBar.setContent(" ready ");
-    }
-    screen.render();
+    withAsyncErrorHandling(async () => {
+      const latest = await checkForUpdate("0.0.02");
+      if (latest) {
+        notify(`update: ${latest.slice(0, 20)}`);
+      } else {
+        setStatus(" ready ");
+      }
+      screen.render();
+    }, () => {
+      setStatus(" ready ");
+      screen.render();
+    });
   })();
 }

@@ -17,6 +17,8 @@ export type Theme = {
   divider: string;
 };
 
+export const DEFAULT_THEME_CONFIG = { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } as const;
+
 export function createTheme(config: { theme: { bg: string; fg: string; accent: string } }): Theme {
   const bg = config.theme.bg;
   const fg = config.theme.fg;

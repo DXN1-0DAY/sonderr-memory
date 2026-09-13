@@ -2,7 +2,7 @@ import blessed from "blessed";
 import { MemoryEntry } from "../../memory/types";
 import { withErrorHandling } from "../../errors/tui-errors";
 import { formatRelativeTime } from "../format";
-import { Theme, createTheme } from "../theme";
+import { Theme, createTheme, DEFAULT_THEME_CONFIG } from "../theme";
 
 export type TimelineOptions = {
   parent: any;
@@ -12,6 +12,7 @@ export type TimelineOptions = {
   height: string;
   theme?: Theme;
   padding?: { top?: number; bottom?: number; left?: number; right?: number };
+  onSelect?: (entry: MemoryEntry) => void;
 };
 
 function isPinned(entry: MemoryEntry): boolean {
@@ -21,12 +22,12 @@ function isPinned(entry: MemoryEntry): boolean {
 function formatTimelineEntry(entry: MemoryEntry, theme: Theme): string {
   const pinned = isPinned(entry) ? "[★] " : "";
   const age = formatRelativeTime(entry.createdAt);
-  const title = entry.content.split("\n")[0].trim().slice(0, 48);
+  const title = (entry.content || "").split("\n")[0].trim().slice(0, 48);
   return `${pinned}{bold}${age}{/bold} | {fg-${theme.accent}}${entry.source}{/fg-${theme.accent}} | ${title}`;
 }
 
 export function createTimeline(opts: TimelineOptions) {
-  const theme = opts.theme || createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const list = blessed.list({
     parent: opts.parent,
     label: " timeline ",
@@ -47,27 +48,49 @@ export function createTimeline(opts: TimelineOptions) {
     vi: true,
     mouse: true,
     alwaysScroll: true,
-    scrollbar: { style: { fg: theme.accent } },
+    scrollbar: { style: { fg: theme.accent, bg: theme.bgPanel } },
   } as any);
 
-  list.on("select", () => {
-    if (list.style && list.style.border) {
+  const entryMap = new Map<number, MemoryEntry>();
+  let lastSelectedIndex = 0;
+  let suppressSelectFlash = false;
+
+  let borderFlashTimer: NodeJS.Timeout | null = null;
+
+  list.on("select", (_el: unknown, idx: number) => {
+    if (!suppressSelectFlash && list.style && list.style.border) {
+      if (borderFlashTimer) clearTimeout(borderFlashTimer);
       const originalFg = (list.style.border as any).fg;
       (list.style.border as any).fg = theme.accentLight;
-      setTimeout(() => {
+      borderFlashTimer = setTimeout(() => {
         (list.style.border as any).fg = originalFg;
+        borderFlashTimer = null;
         if (list.screen) list.screen.render();
       }, 80);
+    }
+    const entry = entryMap.get(idx);
+    if (entry && opts.onSelect) {
+      opts.onSelect(entry);
     }
   });
 
   function render(entries: MemoryEntry[]) {
     withErrorHandling(() => {
+      entryMap.clear();
       const items = entries.map((entry) => formatTimelineEntry(entry, theme));
-      list.setItems(items.length ? items : ["(empty)"]);
-      list.select(0);
+      if (items.length === 0) {
+        list.setItems(["(empty)"]);
+      } else {
+        list.setItems(items);
+        entries.forEach((entry, idx) => entryMap.set(idx, entry));
+        const newIdx = Math.min(lastSelectedIndex, items.length - 1);
+        suppressSelectFlash = true;
+        list.select(newIdx);
+        lastSelectedIndex = newIdx;
+        suppressSelectFlash = false;
+      }
     }, () => {});
   }
 
-  return list as any;
+  return { list, render };
 }

@@ -1,9 +1,9 @@
 import blessed from "blessed";
 import { MemoryEntry, MemoryStore } from "../../memory/types";
 import { withErrorHandling } from "../../errors/tui-errors";
-import { Theme, createTheme } from "../../tui/theme";
+import { Theme, createTheme, DEFAULT_THEME_CONFIG } from "../../tui/theme";
 import { getRelated } from "../../memory/store";
-import { tag } from "../../tui/format";
+import { formatMemoryContent, tag } from "../../tui/format";
 
 export type EditorOptions = {
   parent: any;
@@ -17,7 +17,7 @@ export type EditorOptions = {
 };
 
 export function createEditor(opts: EditorOptions) {
-  const theme = opts.theme || createTheme({ theme: { bg: "#0d0d0d", fg: "#e6e6e6", accent: "#FF6A00" } });
+  const theme = opts.theme || createTheme({ theme: DEFAULT_THEME_CONFIG });
   const box = blessed.box({
     parent: opts.parent,
     label: " content ",
@@ -43,13 +43,14 @@ export function createEditor(opts: EditorOptions) {
 
   function render(entry: MemoryEntry | null) {
     withErrorHandling(() => {
+      const t = tag(theme);
       if (!entry) {
         if (editorTransitionTimer) clearTimeout(editorTransitionTimer);
-        box.setContent("No entry selected.");
+        box.setContent(t.muted("No entry selected."));
+        box.scrollTo(0);
         if (box.screen) box.screen.render();
         return;
       }
-      const t = tag(theme);
       const relatedEntries = opts.store ? getRelated(opts.store, entry, 3) : [];
       const relatedSection =
         relatedEntries.length > 0
@@ -64,11 +65,10 @@ export function createEditor(opts: EditorOptions) {
             ]
           : [];
       const text = [
-        entry.content,
+        formatMemoryContent(entry.content),
         "",
         t.divider(),
         t.heading("METADATA"),
-        t.divider(),
         "",
         `${t.label("id:")}        ${entry.id}`,
         `${t.label("createdAt:")} ${entry.createdAt}`,
@@ -84,14 +84,16 @@ export function createEditor(opts: EditorOptions) {
       ].join("\n");
       if (editorTransitionTimer) clearTimeout(editorTransitionTimer);
       box.setContent("");
-      if (box.screen) box.screen.render();
       editorTransitionTimer = setTimeout(() => {
+        if (!box.screen) return;
         box.setContent(text);
+        box.scrollTo(0);
+        box.screen.render();
         editorTransitionTimer = null;
       }, 20);
     }, () => {
       box.setContent("Error rendering entry.");
-      if (box.screen) box.screen.render();
+      box.scrollTo(0);
     });
   }
 

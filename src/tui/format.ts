@@ -12,11 +12,13 @@ export function formatPreviewText(content: string, maxLen = 100): string {
 }
 
 export function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return "?";
+  const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "now";
   if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(diff / 60);
+  const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d`;
@@ -31,7 +33,7 @@ export function tag(theme: { heading: string; label: string; muted: string; divi
     bold: (text: string) => `{bold}${text}{/bold}`,
     heading: (text: string) => `{bold}{fg-${theme.heading}}${text}{/fg-${theme.heading}}{/bold}`,
     muted: (text: string) => `{fg-${theme.muted}}${text}{/fg-${theme.muted}}`,
-    label: (text: string) => `{bold}${text}{/bold}`,
+    label: (text: string) => `{bold}{fg-${theme.label}}${text}{/fg-${theme.label}}{/bold}`,
     row: (label: string, value: string, valueColor?: string) => {
       const color = valueColor || theme.muted;
       return `{bold}${label}{/bold}{fg-${color}} ${value}{/fg-${color}}`;
