@@ -74,7 +74,9 @@ sonderr-memory launches a clean, minimal TUI by default. No clutter, no complex 
 sonderr-memory            # launch TUI
 ```
 
-**Manager controls (C++23, local):**
+**Manager layout (C++23, local):**
+
+The left sidebar switches between Memories, Files, Settings, MCP, and AI Prompt. The right pane shows the selected area. Use number keys `1`–`5` or `Tab` to switch sections.
 - `j` / `k`: navigate memories
 - `Enter`: open a memory
 - `/`: search

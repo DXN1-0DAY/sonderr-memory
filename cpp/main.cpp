@@ -42,6 +42,7 @@ public:
 
 class App {
     fs::path root = store_root(); std::vector<Memory> all, shown; int selected=0; std::string query, notice="Ready";
+    int section=0;
     void refresh() {
         all.clear(); if (fs::exists(root)) for (auto const& e: fs::recursive_directory_iterator(root))
             if (e.is_regular_file() && (e.path().extension()==".md" || e.path().extension()==".txt")) all.push_back(load(e.path()));
@@ -49,13 +50,21 @@ class App {
     }
     void filter() { shown.clear(); for(auto const& m:all) if(query.empty()||m.title.find(query)!=std::string::npos||m.body.find(query)!=std::string::npos) shown.push_back(m); selected=std::clamp(selected,0,std::max(0,(int)shown.size()-1)); }
     void header(std::string_view s) { std::cout << "\x1b[1;38;5;255m  " << s << "\x1b[0m\n\x1b[38;5;239m  " << std::string(76,'-') << "\x1b[0m\n"; }
+    void sidebar() {
+        const char* items[] = {"MEMORIES", "FILES", "SETTINGS", "MCP", "AI PROMPT"};
+        std::cout << "\x1b[48;5;234m\x1b[38;5;250m  SON DERR\x1b[0m\n\x1b[38;5;239m  LOCAL MEMORY\x1b[0m\n\n";
+        for (int i=0;i<5;i++) std::cout << (section==i?"\x1b[48;5;208m\x1b[38;5;232m  › ":"\x1b[48;5;234m\x1b[38;5;250m    ") << items[i] << "\x1b[0m\n";
+        std::cout << "\x1b[48;5;234m\n\x1b[38;5;239m  ────────────────\n  shared store\n  " << all.size() << " memories\x1b[0m\n";
+    }
     void draw() {
-        std::cout << "\x1b[2J\x1b[H"; header("sonderr-memory   /   LOCAL CONTEXT");
-        std::cout << "\x1b[38;5;208m  " << shown.size() << " memories\x1b[0m  " << (query.empty()?"":"search: "+query) << "\n\n";
-        for(int i=0;i<(int)shown.size()&&i<18;i++) { auto& m=shown[i]; std::cout << (i==selected?"\x1b[48;5;236m\x1b[38;5;255m  › ":"  ") << m.title.substr(0,64) << (i==selected?"\x1b[0m":"") << "\n"; }
-        if(shown.empty()) std::cout << "  No memories found. Press n to create one.\n";
-        std::cout << "\n\x1b[38;5;239m  " << std::string(76,'-') << "\x1b[0m\n  [j/k] navigate   [enter] open   [/] search   [n] new   [r] refresh   [q] quit\n";
-        std::cout << "\x1b[38;5;208m  " << notice << "\x1b[0m\n";
+        std::cout << "\x1b[2J\x1b[H\x1b[1;38;5;255m  SONDERR-MEMORY  /  LOCAL CONTEXT\x1b[0m\n\x1b[38;5;239m  " << std::string(94,'-') << "\x1b[0m\n";
+        sidebar(); std::cout << "\x1b[48;5;232m\x1b[38;5;250m\x1b[3;28H";
+        if(section==0){ std::cout<<"\x1b[1;38;5;255mMEMORIES\x1b[0m  \x1b[38;5;208m"<<shown.size()<<" results\x1b[0m  "<<(query.empty()?"":"search: "+query)<<"\n\n"; for(int i=0;i<(int)shown.size()&&i<18;i++){auto&m=shown[i];std::cout<<(i==selected?"\x1b[48;5;236m  › ":"  ")<<m.title.substr(0,68)<<(i==selected?"\x1b[0m":"")<<"\n";} if(shown.empty())std::cout<<"  No memories found. Press n to create one.\n";}
+        else if(section==1) std::cout<<"\x1b[1;38;5;255mFILES\x1b[0m\n\n  Complete store browser\n  Press Enter to open the file browser.\n";
+        else if(section==2) std::cout<<"\x1b[1;38;5;255mSETTINGS\x1b[0m\n\n  Store root\n  "<<root<<"\n\n  Configuration\n  config.json\n\n  Press Enter to inspect settings.\n";
+        else if(section==3) std::cout<<"\x1b[1;38;5;255mMCP BRIDGE\x1b[0m\n\n  C++23 manager: local\n  JavaScript MCP: optional\n  Endpoint: http://localhost:3099/mcp\n\n  Press Enter to start MCP for connected AIs.\n";
+        else std::cout<<"\x1b[1;38;5;255mAI PROMPT\x1b[0m\n\n  SYSTEM_PROMPT.md\n  Broad + findable + precise labeling\n\n  Press Enter to view the shared prompt.\n";
+        std::cout<<"\x1b[23;1H\x1b[38;5;239m  [1-5] sections  [tab] next  [j/k] navigate  [enter] open  [/] search  [n] new  [x] delete  [q] quit\n\x1b[38;5;208m  "<<notice<<"\x1b[0m\n";
     }
     void detail() { if(shown.empty()) return; std::cout<<"\x1b[2J\x1b[H"; header(shown[selected].title); std::cout<<"\n"<<shown[selected].body<<"\n\n\x1b[38;5;239m  [esc/backspace] back   [q] quit\x1b[0m\n"; char c; while(read(STDIN_FILENO,&c,1)&&c!=27&&c!=127&&c!='q'); }
     void create() { std::cout<<"\x1b[2J\x1b[H"; header("NEW MEMORY"); std::string title, broad, findable, body; std::cout<<"  Precise title: "; std::getline(std::cin,title); if(title.empty()){notice="Cancelled";return;} std::cout<<"  Broad topic:   "; std::getline(std::cin,broad); std::cout<<"  Findable tags: "; std::getline(std::cin,findable); std::cout<<"  Content:       "; std::getline(std::cin,body); auto now=std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()); fs::create_directories(root/"inbox"); auto p=root/"inbox"/(std::to_string(now)+"-memory.md"); std::ofstream out(p); out<<"---\ntitle: "<<title<<"\ntopics: ["<<broad<<"]\ntags: ["<<findable<<"]\n---\n"<<body<<"\n"; notice="Saved "+title; refresh(); }
@@ -64,6 +73,6 @@ class App {
     void files() { std::cout<<"\x1b[2J\x1b[H"; header("STORE FILES"); int n=0; if(fs::exists(root)) for(auto const& e:fs::recursive_directory_iterator(root)) if(e.is_regular_file()&&n++<28) std::cout<<"  "<<fs::relative(e.path(),root).string()<<"  ("<<e.file_size()<<" bytes)\n"; std::cout<<"\n\x1b[38;5;239m  Every listed file is available to MCP clients via list_files/get_file.\n  Press any key to return\x1b[0m\n"; char c; read(STDIN_FILENO,&c,1); }
     void remove_selected(Terminal& t) { if(shown.empty()) return; t.line_mode(true); std::cout<<"\n  Delete '"<<shown[selected].title<<"'? Type yes: "; std::string answer; std::getline(std::cin,answer); t.line_mode(false); if(answer=="yes"){fs::remove(shown[selected].path); notice="Memory deleted"; refresh();}else notice="Delete cancelled"; }
 public:
-    void run(){ Terminal t; refresh(); draw(); char c; while(read(STDIN_FILENO,&c,1)){ if(c=='q')break; if(c=='j'||c==66)selected=std::min(selected+1,(int)shown.size()-1); else if(c=='k'||c==65)selected=std::max(0,selected-1); else if(c=='\n')detail(); else if(c=='r'){refresh();notice="Refreshed";} else if(c=='n'){t.line_mode(true); create(); t.line_mode(false);} else if(c=='s')info("SETTINGS","This C++23 manager is local and reads the shared files directly. Configuration is stored in config.json. Edit it for context limits, result limits, labels, and theme settings."); else if(c=='m')start_mcp(); else if(c=='f')files(); else if(c=='x')remove_selected(t); else if(c=='/'){query.clear(); t.line_mode(true); std::cout<<"\n  Search: "; std::getline(std::cin,query); t.line_mode(false); filter();} draw(); }}
+    void run(){ Terminal t; refresh(); draw(); char c; while(read(STDIN_FILENO,&c,1)){ if(c=='q')break; if(c>='1'&&c<='5'){section=c-'1';} else if(c=='\t'){section=(section+1)%5;} else if(c=='j'||c==66)selected=std::min(selected+1,(int)shown.size()-1); else if(c=='k'||c==65)selected=std::max(0,selected-1); else if(c=='\n'){if(section==0)detail();else if(section==1)files();else if(section==2)info("SETTINGS","This C++23 manager is local and reads the shared files directly. Configuration is stored in config.json.");else if(section==3)start_mcp();else info("AI PROMPT","Use SYSTEM_PROMPT.md in every AI client. Label every memory broadly in topics, findably in tags, and precisely in the title and content. Search before saving, link related entries, and never store secrets.");} else if(c=='r'){refresh();notice="Refreshed";} else if(c=='n'){t.line_mode(true); create(); t.line_mode(false);} else if(c=='x')remove_selected(t); else if(c=='/'){query.clear(); t.line_mode(true); std::cout<<"\n  Search: "; std::getline(std::cin,query); t.line_mode(false); filter();} draw(); }}
 };
 int main(){ App{}.run(); }
