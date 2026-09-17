@@ -39,7 +39,7 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 curl -fsSL https://raw.githubusercontent.com/DXN1-0DAY/sonderr-memory/main/install.sh | bash
 ```
 
-This installs `sonderr-memory` as a global command. Running it with no arguments opens the C++23 manager. The one-line installer automatically clones, installs dependencies, builds the manager, creates the memory store, and installs the launcher. It will:
+This installs `sonderr-memory` as a global command. Running it with no arguments opens the native C++23 desktop GUI. The one-line installer automatically clones, installs dependencies, builds the GUI, creates the memory store, and installs the launcher. It will:
 - Install Bun if missing
 - Clone the application to `~/.local/share/sonderr-memory`
 - Keep user memories separately in `~/.sonderr-memory`
@@ -76,7 +76,9 @@ sonderr-memory            # launch TUI
 
 **Manager layout (C++23, local desktop GUI):**
 
-The native C++23 manager opens as a desktop window with a left sidebar. It switches between Memories, Files, Settings, MCP, and AI Prompt. The right pane shows the selected area, and memories can be opened by clicking them.
+The native C++23 manager opens as a desktop window with a left sidebar. It switches between Memories, Files, Settings, MCP, and AI Prompt. The right pane shows the selected area, memories can be opened by clicking them, and the `+` button opens the full memory form.
+
+The GUI uses the system X11 libraries and does not need a browser, Node GUI framework, or localhost service. The MCP bridge is a separate JavaScript process used only by connected AI clients.
 - `j` / `k`: navigate memories
 - `Enter`: open a memory
 - `/`: search
