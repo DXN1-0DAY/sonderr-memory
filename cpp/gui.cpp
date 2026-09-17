@@ -18,6 +18,13 @@ struct Memory {
     fs::path path;
     std::string title;
     std::string body;
+    std::string topics;
+    std::string tags;
+};
+
+struct StoreFile {
+    fs::path path;
+    std::uintmax_t size{};
 };
 
 static std::string store_root() {
@@ -46,7 +53,15 @@ static Memory parse_memory(const fs::path& path) {
     const auto first_fence = source.find("---");
     const auto second_fence = first_fence == std::string::npos ? std::string::npos : source.find("---", first_fence + 3);
     const std::string body = second_fence == std::string::npos ? source : source.substr(source.find('\n', second_fence) + 1);
-    return {path, title, trim(body)};
+    auto field = [&](std::string_view name) {
+        const auto start = source.find(std::string(name) + ":");
+        if (start == std::string::npos) return std::string{};
+        const auto end = source.find('\n', start);
+        auto value = trim(source.substr(start + name.size() + 1, end - start - name.size() - 1));
+        if (value.size() >= 2 && value.front() == '[' && value.back() == ']') value = value.substr(1, value.size() - 2);
+        return value;
+    };
+    return {path, title, trim(body), field("topics"), field("tags")};
 }
 
 static std::vector<Memory> scan_memories() {
@@ -59,6 +74,17 @@ static std::vector<Memory> scan_memories() {
         }
     }
     std::sort(result.begin(), result.end(), [](const Memory& a, const Memory& b) { return a.path > b.path; });
+    return result;
+}
+
+static std::vector<StoreFile> scan_files() {
+    std::vector<StoreFile> result;
+    const fs::path root = store_root();
+    if (!fs::exists(root)) return result;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) result.push_back({entry.path(), entry.file_size()});
+    }
+    std::sort(result.begin(), result.end(), [](const StoreFile& a, const StoreFile& b) { return a.path < b.path; });
     return result;
 }
 
@@ -85,12 +111,19 @@ class Gui {
     unsigned height_ = 760;
     std::vector<Memory> memories_;
     std::vector<Memory> filtered_;
+    std::vector<StoreFile> files_;
     int section_ = 0;
     int selected_ = 0;
     int scroll_ = 0;
+    int file_selected_ = 0;
+    int file_scroll_ = 0;
+    int detail_scroll_ = 0;
     bool detail_ = false;
+    bool file_detail_ = false;
     bool search_mode_ = false;
     bool create_mode_ = false;
+    bool edit_mode_ = false;
+    bool delete_mode_ = false;
     int form_field_ = 0;
     std::string search_;
     std::string status_ = "Ready";
@@ -115,6 +148,10 @@ class Gui {
         color(value_color);
         XDrawString(display_, window_, gc_, x, y, value.c_str(), static_cast<int>(value.size()));
     }
+    void button(int x, int y, int w, const std::string& value, bool primary = false) {
+        fill(x, y, w, 38, primary ? accent : 0x2b3341);
+        label(x + 16, y + 24, value, primary ? 0x11141b : text);
+    }
     void line_at(int x, int y, int end) { color(line); XDrawLine(display_, window_, gc_, x, y, end, y); }
     void refresh_filter() {
         filtered_.clear();
@@ -124,7 +161,7 @@ class Gui {
         selected_ = std::clamp(selected_, 0, std::max(0, static_cast<int>(filtered_.size()) - 1));
         scroll_ = 0;
     }
-    void reload() { memories_ = scan_memories(); refresh_filter(); status_ = "Loaded " + std::to_string(memories_.size()) + " memories"; }
+    void reload() { memories_ = scan_memories(); files_ = scan_files(); refresh_filter(); status_ = "Loaded " + std::to_string(memories_.size()) + " memories and " + std::to_string(files_.size()) + " files"; }
     void sidebar() {
         fill(0, topbar_height, sidebar_width, height_ - topbar_height, sidebar_bg);
         label(28, 120, "WORKSPACE", muted);
@@ -150,6 +187,7 @@ class Gui {
         label(static_cast<int>(width_) - 368, 43, search_mode_ ? ("Search: " + search_) : "Search memories  /", search_mode_ ? text : muted);
         fill(static_cast<int>(width_) - 78, 18, 48, 38, accent);
         label(static_cast<int>(width_) - 64, 43, "+", 0x11141b);
+        label(286, 54, status_.substr(0, 76), muted);
     }
     void memory_list() {
         label(286, 120, detail_ && !filtered_.empty() ? filtered_[selected_].title : "All memories", text);
@@ -157,8 +195,14 @@ class Gui {
         line_at(286, 166, static_cast<int>(width_) - 28);
         if (detail_ && !filtered_.empty()) {
             label(286, 198, filtered_[selected_].path.string(), muted);
-            int y = 238;
-            for (const auto& row : lines_for(filtered_[selected_].body, 105)) {
+            label(286, 222, "Topics: " + filtered_[selected_].topics, accent);
+            label(520, 222, "Tags: " + filtered_[selected_].tags, muted);
+            button(static_cast<int>(width_) - 240, 184, 92, "Edit");
+            button(static_cast<int>(width_) - 136, 184, 108, "Delete");
+            int y = 272;
+            const auto rows = lines_for(filtered_[selected_].body, 105);
+            for (int index = detail_scroll_; index < static_cast<int>(rows.size()); ++index) {
+                const auto& row = rows[index];
                 label(286, y, row, text);
                 y += 24;
                 if (y > static_cast<int>(height_) - 75) break;
@@ -179,18 +223,31 @@ class Gui {
         label(286, height_ - 38, "Click a memory to inspect  •  N new memory  •  / search  •  R refresh", muted);
     }
     void files() {
-        label(286, 120, "Store files", text);
+        label(286, 120, file_detail_ && !files_.empty() ? fs::relative(files_[file_selected_].path, store_root()).string() : "Store files", text);
         label(286, 145, "Every markdown, text, config, and index file", accent);
         line_at(286, 166, static_cast<int>(width_) - 28);
-        int y = 198;
-        const fs::path root = store_root();
-        if (fs::exists(root)) for (const auto& entry : fs::recursive_directory_iterator(root)) {
-            if (!entry.is_regular_file() || y > static_cast<int>(height_) - 75) continue;
-            label(298, y, fs::relative(entry.path(), root).string(), text);
-            label(820, y, std::to_string(entry.file_size()) + " bytes", muted);
-            y += 28;
+        if (file_detail_ && !files_.empty()) {
+            const auto rows = lines_for(read_file(files_[file_selected_].path), 105);
+            int y = 206;
+            for (int index = detail_scroll_; index < static_cast<int>(rows.size()); ++index) {
+                label(298, y, rows[index], text);
+                y += 22;
+                if (y > static_cast<int>(height_) - 75) break;
+            }
+            button(static_cast<int>(width_) - 140, 184, 112, "Back");
+            label(286, height_ - 38, "Mouse wheel scrolls  •  Esc returns to the files list", muted);
+            return;
         }
-        label(286, height_ - 38, "All files stay local and are available through MCP list_files/get_file", muted);
+        int y = 198;
+        const int visible = static_cast<int>((height_ - 250) / 38);
+        for (int index = file_scroll_; index < static_cast<int>(files_.size()) && index < file_scroll_ + visible; ++index) {
+            if (index == file_selected_) fill(286, y - 24, width_ - 314, 32, 0x242b37);
+            label(298, y, fs::relative(files_[index].path, store_root()).string(), index == file_selected_ ? text : 0xd2d8e2);
+            label(static_cast<int>(width_) - 150, y, std::to_string(files_[index].size) + " B", muted);
+            y += 38;
+        }
+        if (files_.empty()) label(298, 220, "The shared store is empty.", muted);
+        label(286, height_ - 38, "Click a file to inspect it  •  All local files are available through MCP", muted);
     }
     void settings() {
         label(286, 120, "Settings", text); label(286, 145, "Shared configuration and storage", accent); line_at(286, 166, static_cast<int>(width_) - 28);
@@ -198,6 +255,7 @@ class Gui {
         label(298, 292, "Configuration file", muted); label(298, 320, (fs::path(store_root()) / "config.json").string(), text);
         label(298, 374, "Architecture", muted); label(298, 402, "C++23 desktop manager  +  JavaScript MCP bridge", text);
         label(298, 456, "Portability", muted); label(298, 484, "Copy the store folder to move memories between machines and AIs.", text);
+        button(298, 530, 170, "Open config file");
     }
     void mcp() {
         label(286, 120, "MCP Bridge", text); label(286, 145, "Connect any MCP-capable AI to the shared store", accent); line_at(286, 166, static_cast<int>(width_) - 28);
@@ -225,13 +283,24 @@ class Gui {
             fill(244, y + 12, width_ - 488, index == 3 ? 62 : 34, index == form_field_ ? 0x2b3341 : 0x181d25);
             label(258, y + 35, *values[index], text);
         }
-        label(244, height_ - 132, "Enter next field  •  Ctrl+Enter save  •  Esc cancel", muted);
+        button(244, static_cast<int>(height_) - 116, 142, edit_mode_ ? "Save changes" : "Save memory", true);
+        button(398, static_cast<int>(height_) - 116, 110, "Cancel");
+        label(526, height_ - 92, "Tab / Enter next field  •  Ctrl+Enter save", muted);
+    }
+    void delete_modal() {
+        fill(360, 255, width_ - 720, 190, 0x202631);
+        color(0xc95252); XDrawRectangle(display_, window_, gc_, 360, 255, width_ - 720, 190);
+        label(394, 300, "Delete this memory?", text);
+        label(394, 330, "This removes the local markdown file. This cannot be undone.", muted);
+        button(394, 365, 128, "Delete", true);
+        button(536, 365, 104, "Cancel");
     }
     void draw() {
         fill(0, 0, width_, height_, bg); topbar(); sidebar();
         if (section_ == 0) memory_list(); else if (section_ == 1) files(); else if (section_ == 2) settings(); else if (section_ == 3) mcp(); else prompt();
         fill(0, height_ - 1, width_, 1, accent);
         if (create_mode_) create_modal();
+        if (delete_mode_) delete_modal();
         XFlush(display_);
     }
     void select_section(int section) { section_ = section; detail_ = false; search_mode_ = false; scroll_ = 0; status_ = "Viewing " + std::string(section == 0 ? "memories" : section == 1 ? "files" : section == 2 ? "settings" : section == 3 ? "MCP" : "AI prompt"); }
@@ -240,14 +309,44 @@ class Gui {
         const std::string command = "nohup bun run src/mcp-server.ts >>\"" + log + "\" 2>&1 &";
         status_ = std::system(command.c_str()) == 0 ? "MCP service started in the background" : "Could not start MCP service";
     }
+    void open_config() {
+        const fs::path config = fs::path(store_root()) / "config.json";
+        auto found = std::find_if(files_.begin(), files_.end(), [&](const StoreFile& file) { return file.path == config; });
+        if (found == files_.end()) { status_ = "No config.json yet — it is created when settings are saved by the CLI"; return; }
+        file_selected_ = static_cast<int>(std::distance(files_.begin(), found));
+        section_ = 1; file_detail_ = true; detail_scroll_ = 0; status_ = "Opened configuration file";
+    }
+    void begin_edit() {
+        if (filtered_.empty()) return;
+        create_mode_ = true; edit_mode_ = true; form_field_ = 0;
+        form_title_ = filtered_[selected_].title;
+        form_topics_ = filtered_[selected_].topics;
+        form_tags_ = filtered_[selected_].tags;
+        form_body_ = filtered_[selected_].body;
+    }
+    void begin_create() {
+        create_mode_ = true; edit_mode_ = false; form_field_ = 0;
+        form_title_.clear(); form_topics_.clear(); form_tags_.clear(); form_body_.clear();
+    }
+    void delete_selected() {
+        if (filtered_.empty()) return;
+        std::error_code error;
+        fs::remove(filtered_[selected_].path, error);
+        delete_mode_ = false;
+        if (error) { status_ = "Could not delete memory: " + error.message(); return; }
+        selected_ = 0; detail_ = false; reload(); status_ = "Memory deleted";
+    }
     void save_form() {
         if (form_title_.empty() || form_body_.empty()) { status_ = "Title and content are required"; return; }
         fs::create_directories(fs::path(store_root()) / "inbox");
         const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        const auto path = fs::path(store_root()) / "inbox" / (std::to_string(now) + "-memory.md");
+        const auto path = edit_mode_ && !filtered_.empty()
+            ? filtered_[selected_].path
+            : fs::path(store_root()) / "inbox" / (std::to_string(now) + "-memory.md");
         std::ofstream out(path);
-        out << "---\ntitle: " << form_title_ << "\ntopics: [" << form_topics_ << "]\ntags: [" << form_tags_ << "]\n---\n" << form_body_ << "\n";
-        create_mode_ = false; form_title_.clear(); form_topics_.clear(); form_tags_.clear(); form_body_.clear(); reload(); status_ = "Memory saved";
+        out << "---\ntitle: " << form_title_ << "\ntopics: [" << form_topics_ << "]\ntags: [" << form_tags_ << "]\nupdatedAt: " << now << "\n---\n" << form_body_ << "\n";
+        const bool edited = edit_mode_;
+        create_mode_ = false; edit_mode_ = false; form_title_.clear(); form_topics_.clear(); form_tags_.clear(); form_body_.clear(); reload(); status_ = edited ? "Memory updated" : "Memory saved";
     }
 public:
     int run() {
@@ -263,24 +362,47 @@ public:
             if (event.type == ConfigureNotify) { width_ = event.xconfigure.width; height_ = event.xconfigure.height; }
             if (event.type == ButtonPress) {
                 const int x = event.xbutton.x, y = event.xbutton.y;
-                if (create_mode_) { if (x > 220 && y > 210 && y < 540) form_field_ = std::clamp((y - 220) / 72, 0, 3); }
+                if (event.xbutton.button == Button4 || event.xbutton.button == Button5) {
+                    const int delta = event.xbutton.button == Button4 ? -1 : 1;
+                    if ((detail_ || file_detail_)) detail_scroll_ = std::max(0, detail_scroll_ + delta * 3);
+                    else if (section_ == 0) scroll_ = std::max(0, scroll_ + delta);
+                    else if (section_ == 1) file_scroll_ = std::max(0, file_scroll_ + delta);
+                } else if (delete_mode_) {
+                    if (x >= 394 && x <= 522 && y >= 365 && y <= 403) delete_selected();
+                    else if (x >= 536 && x <= 640 && y >= 365 && y <= 403) delete_mode_ = false;
+                } else if (create_mode_) {
+                    if (x >= 244 && x <= 386 && y >= static_cast<int>(height_) - 116 && y <= static_cast<int>(height_) - 78) save_form();
+                    else if (x >= 398 && x <= 508 && y >= static_cast<int>(height_) - 116 && y <= static_cast<int>(height_) - 78) { create_mode_ = false; edit_mode_ = false; }
+                    else if (x > 220 && y > 210 && y < 540) form_field_ = std::clamp((y - 220) / 72, 0, 3);
+                }
                 else if (x < sidebar_width && y >= 113 && y < 400) select_section(std::clamp((y - 113) / 54, 0, 4));
-                else if (section_ == 0 && x > 270 && y > 170 && !filtered_.empty()) { selected_ = std::clamp((y - 170) / 70 + scroll_, 0, static_cast<int>(filtered_.size()) - 1); detail_ = true; }
+                else if (section_ == 0 && detail_ && x >= static_cast<int>(width_) - 240 && x <= static_cast<int>(width_) - 148 && y >= 184 && y <= 222) begin_edit();
+                else if (section_ == 0 && detail_ && x >= static_cast<int>(width_) - 136 && x <= static_cast<int>(width_) - 28 && y >= 184 && y <= 222) delete_mode_ = true;
+                else if (section_ == 0 && x > 270 && y > 170 && !filtered_.empty()) { selected_ = std::clamp((y - 170) / 70 + scroll_, 0, static_cast<int>(filtered_.size()) - 1); detail_ = true; detail_scroll_ = 0; }
+                else if (section_ == 1 && file_detail_ && x >= static_cast<int>(width_) - 140 && x <= static_cast<int>(width_) - 28 && y >= 184 && y <= 222) { file_detail_ = false; detail_scroll_ = 0; }
+                else if (section_ == 1 && x > 270 && y > 170 && !files_.empty()) { file_selected_ = std::clamp((y - 174) / 38 + file_scroll_, 0, static_cast<int>(files_.size()) - 1); file_detail_ = true; detail_scroll_ = 0; }
+                else if (section_ == 2 && x >= 298 && x <= 468 && y >= 530 && y <= 568) open_config();
                 else if (section_ == 3 && x >= 298 && x <= 488 && y >= 418 && y <= 460) start_mcp();
-                else if (x > static_cast<int>(width_) - 90 && y < 70) { create_mode_ = true; form_field_ = 0; search_mode_ = false; }
+                else if (x > static_cast<int>(width_) - 90 && y < 70) { begin_create(); search_mode_ = false; }
                 else if (x > static_cast<int>(width_) - 400 && y < 70) { search_mode_ = true; }
             }
             if (event.type == KeyPress) {
                 KeySym key; char buffer[32]{}; const int length = XLookupString(&event.xkey, buffer, sizeof(buffer), &key, nullptr);
                 const bool ctrl = (event.xkey.state & ControlMask) != 0;
-                if (key == XK_Escape) { if (create_mode_) create_mode_ = false; else if (detail_) detail_ = false; else if (search_mode_) search_mode_ = false; else break; }
+                if (key == XK_Escape) { if (delete_mode_) delete_mode_ = false; else if (create_mode_) { create_mode_ = false; edit_mode_ = false; } else if (file_detail_) file_detail_ = false; else if (detail_) detail_ = false; else if (search_mode_) search_mode_ = false; else break; }
                 else if (key == XK_q && !search_mode_ && !create_mode_) break;
                 else if (key == XK_r && !create_mode_) reload();
-                else if (key == XK_n && !search_mode_ && !create_mode_) { create_mode_ = true; form_field_ = 0; }
+                else if (key == XK_n && !search_mode_ && !create_mode_) begin_create();
+                else if (key == XK_e && detail_ && !create_mode_) begin_edit();
+                else if ((key == XK_Delete || key == XK_x) && detail_ && !create_mode_) delete_mode_ = true;
                 else if (key == XK_slash && !create_mode_) { search_mode_ = true; search_.clear(); }
                 else if (key == XK_Tab && !create_mode_) select_section((section_ + 1) % 5);
+                else if (key == XK_Return && section_ == 0 && !filtered_.empty() && !create_mode_ && !search_mode_) { detail_ = true; detail_scroll_ = 0; }
+                else if (key == XK_Return && section_ == 1 && !files_.empty() && !create_mode_ && !search_mode_) { file_detail_ = true; detail_scroll_ = 0; }
                 else if (key == XK_Up && section_ == 0) { selected_ = std::max(0, selected_ - 1); if (selected_ < scroll_) --scroll_; }
                 else if (key == XK_Down && section_ == 0) { selected_ = std::min(static_cast<int>(filtered_.size()) - 1, selected_ + 1); if (selected_ > scroll_ + 7) ++scroll_; }
+                else if (key == XK_Up && section_ == 1) { file_selected_ = std::max(0, file_selected_ - 1); if (file_selected_ < file_scroll_) --file_scroll_; }
+                else if (key == XK_Down && section_ == 1) { file_selected_ = std::min(static_cast<int>(files_.size()) - 1, file_selected_ + 1); if (file_selected_ > file_scroll_ + 10) ++file_scroll_; }
                 else if (key == XK_Return && create_mode_) { if (ctrl) save_form(); else form_field_ = std::min(3, form_field_ + 1); }
                 else if (search_mode_ && (key == XK_BackSpace || key == XK_Delete)) { if (!search_.empty()) search_.pop_back(); refresh_filter(); }
                 else if (search_mode_ && length > 0 && buffer[0] >= 32) { search_.append(buffer, length); refresh_filter(); }
