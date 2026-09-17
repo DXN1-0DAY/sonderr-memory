@@ -82,6 +82,7 @@ sonderr-memory            # launch TUI
 - `m`: start the separate JavaScript MCP service for AI clients
 - `f`: browse every file in the local store
 - `r`: refresh, `q`: quit
+- `x`: safely delete the selected memory (requires typing `yes`)
 
 **Command palette:**
 Press `/` to open the command palette with autocomplete suggestions.
@@ -181,6 +182,7 @@ sonderr-memory mcp
 Tools exposed:
 - `sonderr_memory_list_files` / `sonderr_memory_get_file` - let connected AIs inspect the complete shared store, including config and indexes
 - `sonderr_memory_labeling_guide` - lets every connected AI retrieve the same labeling rules
+- `sonderr_memory_health` - confirms the shared store and MCP service are healthy
 
 Copy [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) into an AI client’s system/developer instructions. It standardizes broad, findable, and precise labels across every connected AI.
 - `sonderr_memory_save` - save a new memory

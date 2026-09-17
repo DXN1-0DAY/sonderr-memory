@@ -33,6 +33,11 @@ const tools: MCPTool[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "sonderr_memory_health",
+    description: "Report the shared store root, file count, memory count, and MCP server identity",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "sonderr_memory_save",
     description: "Save a new memory entry to the local store",
     inputSchema: {
@@ -159,6 +164,11 @@ export function callTool(name: string, args: Record<string, unknown>): MCPRespon
   const store = createStore();
 
   switch (name) {
+    case "sonderr_memory_health": {
+      let fileCount = 0;
+      if (fs.existsSync(store.root)) for (const item of fs.readdirSync(store.root, { recursive: true })) if (typeof item === "string") fileCount++;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, service: "sonderr-memory", root: store.root, memories: loadEntries(store).length, files: fileCount, shared: true }, null, 2) }] };
+    }
     case "sonderr_memory_labeling_guide":
       return { content: [{ type: "text", text: JSON.stringify({ broad: "Stable category in topics: architecture, workflow, decision, bug, lesson, preference, reference", findable: "Concrete search terms in tags: technologies, files, commands, people, project names", precise: "Exact claim, result, constraint, or next action in title and content", rule: "Search before saving; link related entries; never store secrets." }, null, 2) }] };
     case "sonderr_memory_list_files": {
