@@ -39,12 +39,13 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 curl -fsSL https://raw.githubusercontent.com/DXN1-0DAY/sonderr-memory/main/install.sh | bash
 ```
 
-This installs `sonderr-memory` as a global command. Running it with no arguments opens the C++23 manager. It will:
+This installs `sonderr-memory` as a global command. Running it with no arguments opens the C++23 manager. The one-line installer automatically clones, installs dependencies, builds the manager, creates the memory store, and installs the launcher. It will:
 - Install Bun if missing
-- Clone the repo to `~/.sonderr-memory`
+- Clone the application to `~/.local/share/sonderr-memory`
+- Keep user memories separately in `~/.sonderr-memory`
 - Install dependencies
 - Create `~/.local/bin/sonderr-memory` wrapper
-- Add `~/.local/bin` to your PATH if needed
+- Install `sonderr-memory` to `~/.local/bin`
 
 The C++23 manager is local and does not use a web server. CLI and MCP commands use the JavaScript memory engine, and both sides read the same file-backed store. The optional MCP service listens on localhost only so AI clients can connect to it.
 
