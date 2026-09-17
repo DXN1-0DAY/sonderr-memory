@@ -37,8 +37,10 @@ echo "building C++23 manager..."
 mkdir -p dist
 if command -v g++ >/dev/null 2>&1; then
   g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic cpp/main.cpp -o dist/sonderr-memory-tui
+  g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic cpp/gui.cpp -lX11 -o dist/sonderr-memory-gui
 elif command -v clang++ >/dev/null 2>&1; then
   clang++ -std=c++23 -O2 -Wall -Wextra -Wpedantic cpp/main.cpp -o dist/sonderr-memory-tui
+  clang++ -std=c++23 -O2 -Wall -Wextra -Wpedantic cpp/gui.cpp -lX11 -o dist/sonderr-memory-gui
 else
   echo "A C++23 compiler (g++ or clang++) is required." >&2
   exit 1
@@ -59,7 +61,7 @@ fi
 cd "\${APP_DIR}"
 export SONDERR_MEMORY_ROOT="\${STORE_DIR}"
 if [ "\$#" -eq 0 ]; then
-  exec "\${APP_DIR}/dist/sonderr-memory-tui"
+  exec "\${APP_DIR}/dist/sonderr-memory-gui"
 fi
 exec bun run src/main.ts "\$@"
 EOF

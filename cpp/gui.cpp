@@ -1,0 +1,17 @@
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <X11/Xutil.h>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+namespace fs=std::filesystem;
+struct M{fs::path p;std::string title,body;};
+static std::string root(){if(auto*x=std::getenv("SONDERR_MEMORY_ROOT"))return x;if(auto*x=std::getenv("HOME"))return std::string(x)+"/.sonderr-memory";return ".sonderr-memory";}
+static std::string text(const fs::path&p){std::ifstream f(p);return{std::istreambuf_iterator<char>(f),{}};}
+static M load(const fs::path&p){auto s=text(p);auto a=s.find("title:");auto e=s.find('\n',a);std::string t=a==std::string::npos?p.stem().string():s.substr(a+6,e-a-6);auto d=s.find("---",e);return{p,t,d==std::string::npos?s:s.substr(s.find('\n',d)+1)};}
+static std::vector<M> scan(){std::vector<M>v;auto r=fs::path(root());if(fs::exists(r))for(auto&e:fs::recursive_directory_iterator(r))if(e.is_regular_file()&&(e.path().extension()==".md"||e.path().extension()==".txt"))v.push_back(load(e.path()));std::sort(v.begin(),v.end(),[](auto&a,auto&b){return a.p>b.p;});return v;}
+int main(){Display*d=XOpenDisplay(nullptr);if(!d)return 1;int s=DefaultScreen(d);Window w=XCreateSimpleWindow(d,RootWindow(d,s),80,80,1100,720,0,0,0x101217);XStoreName(d,w,"sonderr-memory - DXN1-0DAY");XSelectInput(d,w,ExposureMask|ButtonPressMask|KeyPressMask|StructureNotifyMask);XMapWindow(d,w);GC g=XCreateGC(d,w,0,nullptr);auto v=scan();int pick=0;bool detail=false;for(;;){XEvent ev;XNextEvent(d,&ev);if(ev.type==DestroyNotify)break;if(ev.type==KeyPress){KeySym k;char b[8];XLookupString(&ev.xkey,b,sizeof b,&k,nullptr);if(k==XK_q||k==XK_Escape)break;if(k==XK_r)v=scan();if(k==XK_Return&&!v.empty())detail=true;}if(ev.type==ButtonPress){int x=ev.xbutton.x,y=ev.xbutton.y;if(x>245&&y>90&&y<680&&!v.empty()){pick=std::clamp((y-100)/34,0,(int)v.size()-1);detail=true;}}if(ev.type==Expose){XSetForeground(d,g,0x171a22);XFillRectangle(d,w,g,0,0,1100,720);XSetForeground(d,g,0x222733);XFillRectangle(d,w,g,0,0,245,720);XSetForeground(d,g,0xff7a18);XFillRectangle(d,w,g,0,0,5,720);XSetForeground(d,g,0xffffff);XDrawString(d,w,g,28,48,"SONDERR-MEMORY",14);XSetForeground(d,g,0x99a3b5);XDrawString(d,w,g,28,70,"DXN1-0DAY / LOCAL MANAGER",27);const char*nav[]={"Memories","Files","Settings","MCP Bridge","AI Prompt"};for(int i=0;i<5;i++){if(i==0){XSetForeground(d,g,0x303746);XFillRectangle(d,w,g,18,92+i*52,205,38);}XSetForeground(d,g,i==0?0xffffff:0xb7c0d0);XDrawString(d,w,g,38,116+i*52,nav[i],std::strlen(nav[i]));}XSetForeground(d,g,0xffffff);if(detail&&!v.empty()){XDrawString(d,w,g,280,58,v[pick].title.c_str(),v[pick].title.size());XSetForeground(d,g,0xb7c0d0);int y=100;std::string line;for(char c:v[pick].body){if(c=='\n'||line.size()>100){XDrawString(d,w,g,280,y,line.c_str(),line.size());y+=22;line.clear();if(y>680)break;}else line+=c;}if(!line.empty())XDrawString(d,w,g,280,y,line.c_str(),line.size());}else{XDrawString(d,w,g,280,58,"All memories",12);XSetForeground(d,g,0x99a3b5);std::string count=std::to_string(v.size())+" files in shared store";XDrawString(d,w,g,280,80,count.c_str(),count.size());int y=120;for(auto&m:v){XSetForeground(d,g,0xffffff);XDrawString(d,w,g,280,y,m.title.substr(0,85).c_str(),std::min<size_t>(85,m.title.size()));XSetForeground(d,g,0x687386);XDrawString(d,w,g,280,y+18,m.p.string().c_str(),std::min<size_t>(100,m.p.string().size()));y+=34;if(y>680)break;}}XFlush(d);}}XFreeGC(d,g);XCloseDisplay(d);}
