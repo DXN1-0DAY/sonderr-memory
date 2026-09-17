@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="DXN1-termux/sonderr-memory"
+REPO="DXN1-0DAY/sonderr-memory"
 BIN_NAME="sonderr-memory"
 INSTALL_DIR="${HOME}/.local/bin"
 REPO_DIR="${HOME}/.sonderr-memory"
@@ -26,6 +26,10 @@ echo "installing dependencies..."
 cd "${REPO_DIR}"
 bun install
 
+echo "building C++23 manager..."
+mkdir -p dist
+g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic cpp/main.cpp -o dist/sonderr-memory-tui
+
 WRAPPER="${INSTALL_DIR}/${BIN_NAME}"
 cat > "${WRAPPER}" <<EOF
 #!/usr/bin/env bash
@@ -36,6 +40,9 @@ if [ ! -d "\${REPO_DIR}" ]; then
   exit 1
 fi
 cd "\${REPO_DIR}"
+if [ "\$#" -eq 0 ]; then
+  exec "\${REPO_DIR}/dist/sonderr-memory-tui"
+fi
 exec bun run src/main.ts "\$@"
 EOF
 chmod +x "${WRAPPER}"

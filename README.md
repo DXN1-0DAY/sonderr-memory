@@ -1,6 +1,6 @@
 <div align="center">
 
-[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.11-FF6A00?style=for-the-badge)](https://github.com/DXN1-termux/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![Bun](https://img.shields.io/badge/runtime-Bun-F472B6?style=for-the-badge)](https://bun.sh) [![TUI](https://img.shields.io/badge/TUI-blessed-1f425f?style=for-the-badge)](https://github.com/chjj/blessed)
+[![sonderr-memory](https://img.shields.io/badge/sonderr--memory-context--engine-FF6A00?style=for-the-badge)](https://github.com/DXN1-0DAY/sonderr-memory) [![Version](https://img.shields.io/badge/version-0.0.16-FF6A00?style=for-the-badge)](https://github.com/DXN1-0DAY/sonderr-memory/releases) [![License](https://img.shields.io/badge/license-MIT-FF6A00?style=for-the-badge)](LICENSE) [![C%2B%2B23](https://img.shields.io/badge/manager-C%2B%2B23-00599C?style=for-the-badge)](https://isocpp.org/)
 
 # sonderr-memory
 
@@ -36,20 +36,22 @@ AI agents today are amnesic. They forget what you built last week, what failed, 
 ### Option 1: curl install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DXN1-termux/sonderr-memory/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DXN1-0DAY/sonderr-memory/main/install.sh | bash
 ```
 
-This installs `sonderr-memory` as a global command. It will:
+This installs `sonderr-memory` as a global command. Running it with no arguments opens the C++23 manager. It will:
 - Install Bun if missing
 - Clone the repo to `~/.sonderr-memory`
 - Install dependencies
 - Create `~/.local/bin/sonderr-memory` wrapper
 - Add `~/.local/bin` to your PATH if needed
 
+The C++23 manager is local and does not use a web server. CLI and MCP commands use the JavaScript memory engine, and both sides read the same file-backed store. The optional MCP service listens on localhost only so AI clients can connect to it.
+
 ### Option 2: build from source
 
 ```bash
-git clone https://github.com/DXN1-termux/sonderr-memory.git
+git clone https://github.com/DXN1-0DAY/sonderr-memory.git
 cd sonderr-memory
 bun install
 bun run dev
@@ -71,10 +73,15 @@ sonderr-memory launches a clean, minimal TUI by default. No clutter, no complex 
 sonderr-memory            # launch TUI
 ```
 
-**Layout:**
-- Main area: clean content view with welcome screen
-- Bottom: command input bar
-- Status bar: current state and feedback
+**Manager controls (C++23, local):**
+- `j` / `k`: navigate memories
+- `Enter`: open a memory
+- `/`: search
+- `n`: create a memory
+- `s`: settings and store information
+- `m`: start the separate JavaScript MCP service for AI clients
+- `f`: browse every file in the local store
+- `r`: refresh, `q`: quit
 
 **Command palette:**
 Press `/` to open the command palette with autocomplete suggestions.
@@ -172,6 +179,10 @@ sonderr-memory mcp
 ```
 
 Tools exposed:
+- `sonderr_memory_list_files` / `sonderr_memory_get_file` - let connected AIs inspect the complete shared store, including config and indexes
+- `sonderr_memory_labeling_guide` - lets every connected AI retrieve the same labeling rules
+
+Copy [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) into an AI client’s system/developer instructions. It standardizes broad, findable, and precise labels across every connected AI.
 - `sonderr_memory_save` - save a new memory
 - `sonderr_memory_search` - search memories
 - `sonderr_memory_list` - list all memories

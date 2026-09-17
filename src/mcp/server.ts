@@ -1,5 +1,7 @@
 import { createStore, loadEntries, saveEntry, searchEntries, getTimeline, getMeta, exportForContext, deleteEntry, updateEntry, linkEntries } from "../memory/store";
 import { MemoryEntry } from "../memory/types";
+import * as fs from "fs";
+import * as path from "path";
 
 export type MCPTool = {
   name: string;
@@ -15,6 +17,21 @@ export type MCPResponse = {
 };
 
 const tools: MCPTool[] = [
+  {
+    name: "sonderr_memory_list_files",
+    description: "List all files in the local sonderr-memory store, including configuration and indexes",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "sonderr_memory_get_file",
+    description: "Read a file from the local sonderr-memory store by its relative path",
+    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  },
+  {
+    name: "sonderr_memory_labeling_guide",
+    description: "Return the shared-memory labeling rules for consistent memories across AI clients",
+    inputSchema: { type: "object", properties: {} },
+  },
   {
     name: "sonderr_memory_save",
     description: "Save a new memory entry to the local store",
@@ -142,6 +159,29 @@ export function callTool(name: string, args: Record<string, unknown>): MCPRespon
   const store = createStore();
 
   switch (name) {
+    case "sonderr_memory_labeling_guide":
+      return { content: [{ type: "text", text: JSON.stringify({ broad: "Stable category in topics: architecture, workflow, decision, bug, lesson, preference, reference", findable: "Concrete search terms in tags: technologies, files, commands, people, project names", precise: "Exact claim, result, constraint, or next action in title and content", rule: "Search before saving; link related entries; never store secrets." }, null, 2) }] };
+    case "sonderr_memory_list_files": {
+      const limit = Number(args.limit) || 500;
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        if (files.length >= limit) return;
+        for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, item.name);
+          if (item.isDirectory()) walk(full); else files.push(path.relative(store.root, full));
+          if (files.length >= limit) return;
+        }
+      };
+      walk(store.root);
+      return { content: [{ type: "text", text: JSON.stringify({ root: store.root, files }, null, 2) }] };
+    }
+    case "sonderr_memory_get_file": {
+      const relative = String(args.path || "");
+      const target = path.resolve(store.root, relative);
+      if (target !== store.root && !target.startsWith(store.root + path.sep)) return { content: [{ type: "text", text: JSON.stringify({ error: "path outside store" }) }] };
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return { content: [{ type: "text", text: JSON.stringify({ error: "file not found" }) }] };
+      return { content: [{ type: "text", text: fs.readFileSync(target, "utf8") }] };
+    }
     case "sonderr_memory_save": {
       const content = String(args.content || "");
       const category = (args.category as MemoryEntry["source"]) || "inbox";
