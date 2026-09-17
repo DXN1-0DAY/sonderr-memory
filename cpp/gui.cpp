@@ -267,8 +267,8 @@ public:
                 else if (x < sidebar_width && y >= 113 && y < 400) select_section(std::clamp((y - 113) / 54, 0, 4));
                 else if (section_ == 0 && x > 270 && y > 170 && !filtered_.empty()) { selected_ = std::clamp((y - 170) / 70 + scroll_, 0, static_cast<int>(filtered_.size()) - 1); detail_ = true; }
                 else if (section_ == 3 && x >= 298 && x <= 488 && y >= 418 && y <= 460) start_mcp();
+                else if (x > static_cast<int>(width_) - 90 && y < 70) { create_mode_ = true; form_field_ = 0; search_mode_ = false; }
                 else if (x > static_cast<int>(width_) - 400 && y < 70) { search_mode_ = true; }
-                else if (x > static_cast<int>(width_) - 90 && y < 70) { create_mode_ = true; form_field_ = 0; }
             }
             if (event.type == KeyPress) {
                 KeySym key; char buffer[32]{}; const int length = XLookupString(&event.xkey, buffer, sizeof(buffer), &key, nullptr);
